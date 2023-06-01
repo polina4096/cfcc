@@ -6,7 +6,7 @@ LDFLAGS=
 EXECUTABLE=cfcc
 
 DEPENDENCIES=tree-sitter-c/src/parser.c
-SOURCES=src/main.c
+SOURCES=$(wildcard src/*.c)
 
 SRC_OBJECTS=$(addprefix bin/, $(SOURCES:src/%.c=%.o))
 DEP_OBJECTS=$(addprefix bin/, $(DEPENDENCIES:tree-sitter-c/src/%.c=%.o))
@@ -16,7 +16,7 @@ all: $(EXECUTABLE)
 	mkdir -p bin
 
 $(EXECUTABLE): $(OBJECTS)
-	$(CC) $(LDFLAGS) $^ -o bin/$@
+	$(CC) $(LDFLAGS) bin/main.o -o bin/$@
 
 bin/%.o: src/%.c
 	$(CC) $(CFLAGS) -Itree-sitter-c/src -Isrc -c $< -o $@

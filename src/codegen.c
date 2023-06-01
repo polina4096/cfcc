@@ -110,12 +110,15 @@ size_t generate_expr(struct Expression* expr, struct RegisterAllocator* register
             size_t r2 = generate_expr(bin_op->right, registers, buffer);
             switch (bin_op->kind) {
                 case BINARY_OP_ADD:
+                    strfmt(buffer, "\taddl %%%s, %%%s\n", registers->scratch[r2], registers->scratch[r1]);
                     break;
 
                 case BINARY_OP_SUB:
+                    strfmt(buffer, "\tsubl %%%s, %%%s\n", registers->scratch[r2], registers->scratch[r1]);
                     break;
 
                 case BINARY_OP_DIV:
+                    // TODO: division is hard :\
                     break;
 
                 case BINARY_OP_MUL:

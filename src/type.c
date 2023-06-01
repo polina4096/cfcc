@@ -2,6 +2,7 @@
 #define CFCC_TYPE_C
 
 #include <stddef.h>
+#include <string.h>
 
 enum TypeKind {
     TYPE_KIND_BASIC,
@@ -76,6 +77,24 @@ size_t type_size(struct Type* type) {
 
         case TYPE_KIND_ARRAY:
             return type_size_array(&type->array);
+    }
+}
+
+#include "../deps/tree-sitter/lib/include/tree_sitter/api.h"
+
+void lower_type(const char* buffer, TSNode node, struct Type* type) {
+    size_t start = ts_node_start_byte(node);
+    size_t end = ts_node_end_byte(node);
+    size_t length = end - start;
+
+    if (strncmp(&buffer[start], "int", length) == 0) {
+        type->kind  = TYPE_KIND_BASIC;
+        type->basic = TYPE_I32;
+    } else if (strncmp(&buffer[start], "float", length) == 0) {
+        type->kind  = TYPE_KIND_BASIC;
+        type->basic = TYPE_F32;
+    } else {
+
     }
 }
 

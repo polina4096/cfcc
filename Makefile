@@ -5,9 +5,8 @@ LDFLAGS=
 
 EXECUTABLE=cfcc
 
-DEPENDENCIES_TREE_SITTER_C=deps/tree-sitter-c/src/parser.c
-DEPENDENCIES_TREE_SITTER_API=deps/tree-sitter/lib/src/lib.c
-DEPENDENCIES=$(DEPENDENCIES_TREE_SITTER_C:deps/tree-sitter-c/src/%.c=%.o) $(DEPENDENCIES_TREE_SITTER_API:deps/tree-sitter/lib/src/%.c=%.o)
+DEPENDENCIES_TREE_SITTER=deps/tree-sitter/lib/src/lib.c
+DEPENDENCIES=$(DEPENDENCIES_TREE_SITTER:deps/tree-sitter/lib/src/%.c=%.o)
 
 SOURCES=$(wildcard src/*.c)
 
@@ -19,7 +18,7 @@ all: $(EXECUTABLE)
 	mkdir -p bin
 
 $(EXECUTABLE): $(OBJECTS)
-	$(CC) $(LDFLAGS) bin/main.o bin/lib.o bin/parser.o -o bin/$@
+	$(CC) $(LDFLAGS) bin/main.o bin/lib.o -o bin/$@
 
 bin/%.o: src/%.c
 	$(CC) $(CFLAGS) -Ideps/tree-sitter-c/src -Ideps/tree-sitter/lib/include -Isrc -c $< -o $@

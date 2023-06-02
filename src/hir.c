@@ -180,9 +180,15 @@ enum BinaryOperation parse_binary_op(char* str) {
 
 // ast -> hir
 void lower_expression(struct Expression* expr, const char* src, TSNode node) {
-    dbg_node(node);
 
     switch (ts_node_symbol(node)) {
+        case sym_parenthesized_expression: {
+            dbg_node(node);
+            TSNode inner_node = ts_node_named_child(node, 0);
+            lower_expression(expr, src, inner_node);
+            break;
+        }
+
         case sym_binary_expression: {
             expr->kind = EXPR_BIN_OP;
 
@@ -228,8 +234,8 @@ void lower_expression(struct Expression* expr, const char* src, TSNode node) {
 }
 
 void lower_unit(struct Unit* unit, const char* src) {
-    // unit->functions_length = 0;
-    // unit->globals_length = 0;
+    unit->functions_length = 0;
+    unit->globals_length = 0;
 
     TSParser* parser = ts_parser_new();
     ts_parser_set_language(parser, tree_sitter_c());

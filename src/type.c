@@ -11,6 +11,7 @@ enum TypeKind {
 };
 
 enum FundamentalType {
+    TYPE_VOID,
     TYPE_I32,
     TYPE_F32,
 };

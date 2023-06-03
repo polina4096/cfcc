@@ -55,6 +55,10 @@ struct RegisterAllocator {
     size_t argument_count;
 };
 
+struct Context {
+    struct RegisterAllocator allocator;
+};
+
 size_t alloc_register(struct RegisterAllocator* registers) {
     for (int i = 0; i < registers->scratch_count; i++) {
         // 0 means register has not been taken yet
@@ -74,9 +78,15 @@ void free_register(struct RegisterAllocator* registers, size_t idx) {
     registers->scratch_state[idx] = 0;
 }
 
-size_t generate_expr(struct Expression* expr, struct RegisterAllocator* registers, char** buffer) {    
+size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Context* ctx, char** buffer) {    
     switch (expr->kind) {
         case EXPR_VARIABLE: {
+            size_t r = alloc_register(&ctx->allocator);
+            strfmt(buffer, "\tmovl -%i(%%rbp), %%%sd\n", 4, ctx->allocator.scratch[r]);
+            return r;
+        }
+
+        case EXPR_ASSIGNMENT: {
             break;
         }
 
@@ -86,8 +96,8 @@ size_t generate_expr(struct Expression* expr, struct RegisterAllocator* register
                 case TYPE_KIND_BASIC: {
                     switch (lit->type->basic) {
                         case TYPE_I32: {
-                            size_t r = alloc_register(registers);
-                            strfmt(buffer, "\tmovl $%s, %%%s\n", expr->expr_literal.value, registers->scratch[r]);
+                            size_t r = alloc_register(&ctx->allocator);
+                            strfmt(buffer, "\tmovl $%s, %%%sd\n", expr->expr_literal.value, ctx->allocator.scratch[r]);
                             return r;
                         }
 
@@ -111,20 +121,63 @@ size_t generate_expr(struct Expression* expr, struct RegisterAllocator* register
         }
 
         case EXPR_CALL: {
-            break;
+            for (int i = 0; i < ctx->allocator.scratch_count; i++) {
+                if (ctx->allocator.scratch_state[i] != 0) {
+                    strfmt(buffer, "\tpushq %%%s\n", ctx->allocator.scratch[i]);
+                }
+            }
+
+            size_t r = alloc_register(&ctx->allocator);
+            strfmt(buffer, "\tcall %s\n", expr->expr_call.func->identifier);
+
+            for (int i = 0; i < ctx->allocator.scratch_count; i++) {
+                if (i != r && ctx->allocator.scratch_state[i] != 0) {
+                    strfmt(buffer, "\tpopq %%%s\n", ctx->allocator.scratch[i]);
+                }
+            }
+
+            struct Type* return_type = expr->expr_call.func->return_type;
+            switch (return_type->kind) {
+                case TYPE_KIND_BASIC: {
+                    switch (return_type->basic) {
+                        case TYPE_VOID:
+                            break;
+
+                        case TYPE_I32:
+                            strfmt(buffer, "\tmovl %%eax, %%%sd\n", ctx->allocator.scratch[r]);
+                            break;
+
+                        case TYPE_F32:
+                            break;
+                    }
+                    break;
+                }
+
+                case TYPE_KIND_COMPOUND: {
+
+                    break;
+                }
+
+                case TYPE_KIND_ARRAY: {
+
+                    break;
+                }
+            }
+
+            return r;
         }
 
         case EXPR_BIN_OP: {
             struct ExprBinaryOp* bin_op = &expr->expr_binary_op;
-            size_t r1 = generate_expr(bin_op->left, registers, buffer);
-            size_t r2 = generate_expr(bin_op->right, registers, buffer);
+            size_t r1 = generate_expr(bin_op->left, scope, ctx, buffer);
+            size_t r2 = generate_expr(bin_op->right, scope, ctx, buffer);
             switch (bin_op->kind) {
                 case BINARY_OP_ADD:
-                    strfmt(buffer, "\taddl %%%s, %%%s\n", registers->scratch[r2], registers->scratch[r1]);
+                    strfmt(buffer, "\taddl %%%sd, %%%sd\n", ctx->allocator.scratch[r2], ctx->allocator.scratch[r1]);
                     break;
 
                 case BINARY_OP_SUB:
-                    strfmt(buffer, "\tsubl %%%s, %%%s\n", registers->scratch[r2], registers->scratch[r1]);
+                    strfmt(buffer, "\tsubl %%%sd, %%%sd\n", ctx->allocator.scratch[r2], ctx->allocator.scratch[r1]);
                     break;
 
                 case BINARY_OP_DIV:
@@ -132,11 +185,11 @@ size_t generate_expr(struct Expression* expr, struct RegisterAllocator* register
                     break;
 
                 case BINARY_OP_MUL:
-                    strfmt(buffer, "\timull %%%s, %%%s\n", registers->scratch[r2], registers->scratch[r1]);
+                    strfmt(buffer, "\timull %%%sd, %%%sd\n", ctx->allocator.scratch[r2], ctx->allocator.scratch[r1]);
                     break;
             }
 
-            free_register(registers, r2);
+            free_register(&ctx->allocator, r2);
             return r1;
         }
     }
@@ -144,7 +197,7 @@ size_t generate_expr(struct Expression* expr, struct RegisterAllocator* register
     return -1;
 }
 
-char* generate(struct Unit* unit, struct RegisterAllocator* registers) {
+char* generate(struct Unit* unit, struct Context* ctx) {
     char* buffer = NULL;
     strapp(&buffer,
         "\t.text\n"
@@ -182,15 +235,20 @@ char* generate(struct Unit* unit, struct RegisterAllocator* registers) {
             struct Statement* stmt = &func->body[j];
             switch (stmt->kind) {
                 case STMT_RETURN: {
-                    size_t r = generate_expr(&stmt->stmt_return.expr, registers, &buffer);
-                    strfmt(&buffer, "\tmovl %%%s, %%eax\n", registers->scratch[r]);
-                    free_register(registers, r);
+                    size_t r = generate_expr(&stmt->stmt_return.expr, &unit->scope, ctx, &buffer);
+                    strfmt(&buffer, "\tmovl %%%sd, %%eax\n", ctx->allocator.scratch[r]);
+                    free_register(&ctx->allocator, r);
+
+                    strfmt(&buffer, "\taddq $%zu, %%rsp\n", frame_size);
+
+                    strapp(&buffer, "\tpopq %rbp\n");
+                    strapp(&buffer, "\tretq\n");
                     break;
                 }
 
                 case STMT_EXPRESSION: {
-                    // size_t r = generate_expr(&stmt->stmt_expression.expr, registers, &buffer);
-                    // free_register(registers, r);
+                    size_t r = generate_expr(&stmt->stmt_expression.expr, &unit->scope, ctx, &buffer);
+                    free_register(&ctx->allocator, r);
                     break;
                 }
             }

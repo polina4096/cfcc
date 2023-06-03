@@ -1,5 +1,7 @@
-int main(int a) {
-    int _1;
-    a = 5;
-    return 20 * 5 - (12 + 12 + 12);
+int five() {
+    return 2 + 3;
+}
+
+int main() {
+    return 20 * five() - (12 + 12 + 12);
 }

@@ -51,6 +51,12 @@ struct ExprVariable {
     struct Variable* variable;
 };
 
+// Expressions
+struct ExprAssignment {
+    struct Variable* variable;
+    struct Expression* expression;
+};
+
 struct ExprLiteral {
     char* value;
     struct Type* type;
@@ -78,6 +84,7 @@ struct ExprBinaryOp {
 
 enum ExpressionKind {
     EXPR_VARIABLE,
+    EXPR_ASSIGNMENT,
     EXPR_LITERAL,
     EXPR_CALL,
     EXPR_BIN_OP,
@@ -87,6 +94,7 @@ struct Expression {
     enum ExpressionKind kind;
     union {
         struct ExprVariable expr_variable;
+        struct ExprAssignment expr_assignment;
         struct ExprLiteral expr_literal;
         struct ExprCall expr_call;
         struct ExprBinaryOp expr_binary_op;
@@ -193,8 +201,32 @@ enum BinaryOperation parse_binary_op(char* str) {
 }
 
 // ast -> hir
-void lower_expression(struct Expression* expr, const char* src, TSNode node) {
+void lower_expression(struct Expression* expr, struct Scope* scope, const char* src, TSNode node) {
     switch (ts_node_symbol(node)) {
+        case sym_call_expression: {
+            expr->kind = EXPR_CALL;
+            expr->expr_call.func = NULL;
+            
+            TSNode ident_node = ts_node_named_child(node, 0);
+            char* identifier = tsnstr(src, ident_node);
+            for (int i = 0; i < scope->functions_length; i++) {
+                if (strcmp(identifier, scope->functions[i].identifier) == 0) {
+                    expr->expr_call.func = &scope->functions[i];
+                    break;
+                }
+            }
+
+            if (expr->expr_call.func == NULL) {
+                printf("function `%s` not found", identifier);
+            }
+
+            // TODO: args
+            // TSNode args_node = ts_node_named_child(node, 1);
+            // dbg_node(args_node);
+
+            break;
+        }
+        
         case sym_identifier: {
             
             break;
@@ -202,7 +234,7 @@ void lower_expression(struct Expression* expr, const char* src, TSNode node) {
 
         case sym_parenthesized_expression: {
             TSNode inner_node = ts_node_named_child(node, 0);
-            lower_expression(expr, src, inner_node);
+            lower_expression(expr, scope, src, inner_node);
             break;
         }
 
@@ -219,10 +251,10 @@ void lower_expression(struct Expression* expr, const char* src, TSNode node) {
             expr->expr_binary_op.kind = op;
 
             expr->expr_binary_op.left = malloc(sizeof(struct Expression));
-            lower_expression(expr->expr_binary_op.left, src, left_node);
+            lower_expression(expr->expr_binary_op.left, scope, src, left_node);
 
             expr->expr_binary_op.right = malloc(sizeof(struct Expression));
-            lower_expression(expr->expr_binary_op.right, src, right_node);
+            lower_expression(expr->expr_binary_op.right, scope, src, right_node);
             break;
         }
 
@@ -343,7 +375,7 @@ void lower_unit(struct Unit* unit, const char* src) {
 
                             struct Expression* expr = &stmt->stmt_return.expr;
                             TSNode expr_node = ts_node_named_child(stmt_node, 0);
-                            lower_expression(expr, src, expr_node);
+                            lower_expression(expr, &unit->scope, src, expr_node);
                             break;
                         }
 
@@ -365,7 +397,7 @@ void lower_unit(struct Unit* unit, const char* src) {
 
                             struct Expression* expr = &stmt->stmt_expression.expr;
                             TSNode expr_node = ts_node_named_child(stmt_node, 0);
-                            lower_expression(expr, src, expr_node);
+                            lower_expression(expr, &unit->scope, src, expr_node);
                             break;
                         }
 

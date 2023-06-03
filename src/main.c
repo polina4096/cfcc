@@ -53,18 +53,18 @@ int main() {
     
     registers->argument_count = 4;
     registers->argument = malloc(sizeof(const char*) * registers->argument_count);
-    registers->argument[0] = "rdi";
-    registers->argument[1] = "rsi";
-    registers->argument[2] = "rdx";
-    registers->argument[3] = "rcx";
+    registers->argument[0] = "di";
+    registers->argument[1] = "si";
+    registers->argument[2] = "dx";
+    registers->argument[3] = "cx";
 
     registers->scratch_count = 4;
     registers->scratch_state = calloc(registers->scratch_count, sizeof(int));
     registers->scratch = malloc(sizeof(const char*) * registers->scratch_count);
-    registers->scratch[0] = "r8d";
-    registers->scratch[1] = "r9d";
-    registers->scratch[2] = "r10d";
-    registers->scratch[3] = "r11d";
+    registers->scratch[0] = "r8";
+    registers->scratch[1] = "r9";
+    registers->scratch[2] = "r10";
+    registers->scratch[3] = "r11";
 
     char* str = generate(&unit, registers);
     printf("%s\n", str);

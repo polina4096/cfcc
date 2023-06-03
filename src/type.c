@@ -53,7 +53,6 @@ static size_t type_size_basic(enum FundamentalType fundamental) {
     }
 }
 
-
 static size_t type_size_compound(struct Compound* compound) {
     // size_t byte_size;
     // for (int i = 0; i < compound.fields_length; i++) {

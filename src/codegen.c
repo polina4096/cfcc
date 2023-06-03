@@ -10,9 +10,16 @@
 
 static int strapp(char** buffer_ptr, char* appendage) {
     size_t length_appendage = strlen(appendage);
-    size_t length_buffer = *buffer_ptr != NULL ? strlen(*buffer_ptr) : 0;
-    char* ptr = realloc(*buffer_ptr, length_buffer + length_appendage);
-    strcat(ptr, appendage);
+
+    char* ptr;
+    if (*buffer_ptr != NULL) {
+        ptr = realloc(*buffer_ptr, strlen(*buffer_ptr) + length_appendage + 1);
+        strcat(ptr, appendage);
+    } else {
+        ptr = malloc(length_appendage + 1);
+        memcpy(ptr, appendage, length_appendage);
+        ptr[length_appendage] = '\0';
+    }
 
     if (ptr != NULL) {
         *buffer_ptr = ptr;
@@ -32,8 +39,11 @@ static int strfmt(char** buffer_ptr, const char* format, ...) {
     va_start(args, format);
     vsnprintf(temp, length + 1, format, args);
     va_end(args);
+    
+    int result = strapp(buffer_ptr, temp);
+    free(temp);
 
-    return strapp(buffer_ptr, temp);
+    return result;
 }
 
 struct RegisterAllocator {
@@ -64,7 +74,7 @@ void free_register(struct RegisterAllocator* registers, size_t idx) {
     registers->scratch_state[idx] = 0;
 }
 
-size_t generate_expr(struct Expression* expr, struct RegisterAllocator* registers, char** buffer) {
+size_t generate_expr(struct Expression* expr, struct RegisterAllocator* registers, char** buffer) {    
     switch (expr->kind) {
         case EXPR_VARIABLE: {
             break;
@@ -145,11 +155,9 @@ char* generate(struct Unit* unit, struct RegisterAllocator* registers) {
         "\t.string \"%d\\n\"\n"
     );
 
-    for (int i = 0; i < unit->functions_length; i++) {
-        struct Function* func = &unit->functions[i];
-        strapp(&buffer, "\n");
-        strapp(&buffer, func->identifier);
-        strapp(&buffer, ":\n");
+    for (int i = 0; i < unit->scope.functions_length; i++) {
+        struct Function* func = &unit->scope.functions[i];
+        strfmt(&buffer, "\n%s:\n", func->identifier);
 
         // save prevoius base pointer
         strapp(&buffer, "\tpushq %rbp\n");
@@ -159,26 +167,37 @@ char* generate(struct Unit* unit, struct RegisterAllocator* registers) {
 
         size_t frame_size = 0; // calculate stack frame size
         for (int j = 0; j < func->params_length; j++) frame_size += type_size(func->params[j].type);
-        for (int j = 0; j < func->locals_length; j++) frame_size += type_size(func->locals[j].type);
+        for (int j = 0; j < func->scope.variables_length; j++) frame_size += type_size(func->scope.variables[j].type);
 
         // align stack frame to 16 bytes
-        frame_size += 16 - frame_size % 16;
+        if (frame_size % 16 != 0) {
+            frame_size += 16 - frame_size % 16;
+        }
 
         // allocate stack space for locals and parameters
-        // strfmt(&buffer, "\tsubq $%zu, %%rsp\n", frame_size);
+        strfmt(&buffer, "\tsubq $%zu, %%rsp\n", frame_size);
 
         // generate statements
         for (int j = 0; j < func->body_length; j++) {
             struct Statement* stmt = &func->body[j];
             switch (stmt->kind) {
                 case STMT_RETURN: {
-                    size_t r = generate_expr(stmt->stmt_return.expr, registers, &buffer);
+                    size_t r = generate_expr(&stmt->stmt_return.expr, registers, &buffer);
                     strfmt(&buffer, "\tmovl %%%s, %%eax\n", registers->scratch[r]);
                     free_register(registers, r);
                     break;
                 }
+
+                case STMT_EXPRESSION: {
+                    // size_t r = generate_expr(&stmt->stmt_expression.expr, registers, &buffer);
+                    // free_register(registers, r);
+                    break;
+                }
             }
         }
+
+        // free stack space for locals and parameters
+        strfmt(&buffer, "\taddq $%zu, %%rsp\n", frame_size);
 
         strapp(&buffer, "\tpopq %rbp\n");
         strapp(&buffer, "\tretq\n");

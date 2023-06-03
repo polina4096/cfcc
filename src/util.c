@@ -11,7 +11,7 @@ char* read_file(char* filename) {
     long length = ftell(f);
     fseek(f, 0, SEEK_SET);
     
-    char *buffer = (char*) malloc(length + 1);
+    char* buffer = malloc(length + 1);
     buffer[length] = '\0';
 
     fread(buffer, 1, length, f);

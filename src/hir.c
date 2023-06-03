@@ -14,6 +14,19 @@ struct Variable {
     struct Type* type;
 };
 
+struct Function;
+
+struct Scope {
+    struct Scope* outer;
+
+    struct Function* functions;
+    size_t functions_length;
+    
+    struct Variable* variables;
+    size_t variables_length;
+};
+
+
 struct Function {
     char* identifier;
     
@@ -22,8 +35,7 @@ struct Function {
 
     struct Type* return_type;
 
-    struct Variable* locals;
-    size_t locals_length;
+    struct Scope scope;
 
     struct Statement* body;
     size_t body_length;
@@ -31,27 +43,7 @@ struct Function {
 
 // Compilation Unit
 struct Unit {
-    struct Function* functions;
-    size_t functions_length;
-    
-    struct Variable* globals;
-    size_t globals_length;
-};
-
-// Statements
-struct StmtReturn {
-    struct Expression* expr;
-};
-
-enum StatementKind {
-    STMT_RETURN
-};
-
-struct Statement {
-    enum StatementKind kind;
-    union {
-        struct StmtReturn stmt_return;
-    };
+    struct Scope scope;
 };
 
 // Expressions
@@ -101,6 +93,28 @@ struct Expression {
     };
 };
 
+// Statements
+struct StmtReturn {
+    struct Expression expr;
+};
+
+struct StmtExpression {
+    struct Expression expr;
+};
+
+enum StatementKind {
+    STMT_RETURN,
+    STMT_EXPRESSION,
+};
+
+struct Statement {
+    enum StatementKind kind;
+    union {
+        struct StmtReturn stmt_return;
+        struct StmtExpression stmt_expression;
+    };
+};
+
 // Lowering
 #include "../deps/tree-sitter-c/src/tree_sitter/parser.h"
 #include "../deps/tree-sitter-c/src/parser.c"
@@ -130,7 +144,7 @@ void dbg_node(TSNode node) {
     return;
 #endif
 
-    printf("%i %s\n", ts_node_symbol(node), ts_node_type(node));
+    printf("\n%i %s\n", ts_node_symbol(node), ts_node_type(node));
     if (ts_node_child_count(node) > 0) {
         printf("\t- children -\n");
         print_nodes(node);
@@ -142,7 +156,7 @@ void dbg_node_named(TSNode node) {
     return;
 #endif
 
-    printf("%i %s\n\t- children -\n", ts_node_symbol(node), ts_node_type(node));
+    printf("\n%i %s\n\t- children -\n", ts_node_symbol(node), ts_node_type(node));
     if (ts_node_named_child_count(node) > 0) {
         printf("\t- children -\n");
         print_named_nodes(node);
@@ -154,7 +168,7 @@ char* tsnstr(const char* src, TSNode node) {
     size_t end = ts_node_end_byte(node);
     size_t length = end - start;
 
-    char* buffer = malloc(length);
+    char* buffer = malloc(length + 1);
     memcpy(buffer, &src[start], length);
     buffer[length] = '\0';
 
@@ -180,10 +194,13 @@ enum BinaryOperation parse_binary_op(char* str) {
 
 // ast -> hir
 void lower_expression(struct Expression* expr, const char* src, TSNode node) {
-
     switch (ts_node_symbol(node)) {
+        case sym_identifier: {
+            
+            break;
+        }
+
         case sym_parenthesized_expression: {
-            dbg_node(node);
             TSNode inner_node = ts_node_named_child(node, 0);
             lower_expression(expr, src, inner_node);
             break;
@@ -230,12 +247,41 @@ void lower_expression(struct Expression* expr, const char* src, TSNode node) {
 
             break;
         }
+
+        default:
+            dbg_node_named(node);
+            break;
     }
 }
 
+// list helper functions
+struct Statement* append_stmt(struct Function* func) {
+    func->body_length += 1;
+    func->body = realloc(func->body, sizeof(struct Statement) * func->body_length);
+    return &func->body[func->body_length - 1];
+}
+
+struct Function* append_func(struct Scope* scope) {
+    scope->functions_length += 1;
+    scope->functions = realloc(scope->functions, sizeof(struct Function) * scope->functions_length);
+    return &scope->functions[scope->functions_length - 1];
+}
+
+struct Variable* append_var(struct Function* func) {
+    func->scope.variables_length += 1;
+    func->scope.variables = realloc(func->scope.variables, sizeof(struct Variable) * func->scope.variables_length);
+    return &func->scope.variables[func->scope.variables_length - 1];
+}
+
+struct Variable* append_param(struct Function* func) {
+    func->params_length += 1;
+    func->params = realloc(func->params, sizeof(struct Variable) * func->params_length);
+    return &func->params[func->params_length - 1];
+}
+
 void lower_unit(struct Unit* unit, const char* src) {
-    unit->functions_length = 0;
-    unit->globals_length = 0;
+    unit->scope.functions_length = 0;
+    unit->scope.variables_length = 0;
 
     TSParser* parser = ts_parser_new();
     ts_parser_set_language(parser, tree_sitter_c());
@@ -258,46 +304,83 @@ void lower_unit(struct Unit* unit, const char* src) {
                 TSNode func_declarator_node = ts_node_named_child(node, 1);
                 TSNode func_body_node = ts_node_named_child(node, 2);
                 
+                struct Function* func = append_func(&unit->scope);
+                func->scope.variables = NULL;
+                func->scope.variables_length = 0;
+                func->params = NULL;
+                func->params_length = 0;
+                func->body = NULL;
+                func->body_length = 0;
+
                 struct Type* type = malloc(sizeof(struct Type));
                 lower_type(src, func_return_type_node, type);
-
-                unit->functions_length += 1;
-                unit->functions = realloc(unit->functions, sizeof(struct Function) * unit->functions_length);
-                struct Function* func = &unit->functions[unit->functions_length - 1];
                 func->return_type = type;
 
                 TSNode func_identifier_node = ts_node_named_child(func_declarator_node, 0);
                 func->identifier = tsnstr(src, func_identifier_node);
 
-                // TSNode func_params_node = ts_node_named_child(func_declarator_node, 1);
-                // size_t func_params_count = ts_node_named_child_count(func_params_node);
-                // for (int j = 0; i < func_params_count; i++) {
-                //     // TSNode func_param = ts_node_named_child(func_params_node, j);
-                //     // print_named_nodes(func_param);
-                //     // printf("\n");
-                // }
+                TSNode func_params_node = ts_node_named_child(func_declarator_node, 1);
+                size_t func_params_count = ts_node_named_child_count(func_params_node);
+                for (int j = 0; i < func_params_count; i++) {
+                    TSNode param_node = ts_node_named_child(func_params_node, j);
+                    TSNode param_type_node = ts_node_named_child(param_node, 0);
+                    TSNode param_ident_node = ts_node_named_child(param_node, 1);
+                    struct Type* type = malloc(sizeof(struct Type));
+                    lower_type(src, param_type_node, type);
+                    
+                    struct Variable* param = append_param(func);
+                    param->name = tsnstr(src, param_ident_node);
+                    param->type = type;
+                }
                 
                 size_t func_body_node_children_length = ts_node_named_child_count(func_body_node);
                 for (int j = 0; j < func_body_node_children_length; j++) {
                     TSNode stmt_node = ts_node_named_child(func_body_node, j);
                     switch (ts_node_symbol(stmt_node)) {
                         case sym_return_statement: {
-                            func->body_length += 1;
-                            func->body = realloc(func->body, sizeof(struct Statement) * func->body_length);
-                            struct Statement* stmt = &func->body[func->body_length - 1];
+                            struct Statement* stmt = append_stmt(func);
                             stmt->kind = STMT_RETURN;
-                            stmt->stmt_return.expr = malloc(sizeof(struct Expression));
-                            
-                            struct Expression* expr = stmt->stmt_return.expr;
+
+                            struct Expression* expr = &stmt->stmt_return.expr;
                             TSNode expr_node = ts_node_named_child(stmt_node, 0);
                             lower_expression(expr, src, expr_node);
                             break;
                         }
+
+                        case sym_declaration: {
+                            TSNode decl_type_node = ts_node_named_child(node, 0);
+                            TSNode decl_ident_node = ts_node_named_child(node, 1);
+                            struct Type* type = malloc(sizeof(struct Type));
+                            lower_type(src, decl_type_node, type);
+                            
+                            struct Variable* local = append_var(func);
+                            local->name = tsnstr(src, decl_ident_node);
+                            local->type = type;
+                            break;
+                        }
+
+                        case sym_expression_statement: {
+                            struct Statement* stmt = append_stmt(func);
+                            stmt->kind = STMT_EXPRESSION;
+
+                            struct Expression* expr = &stmt->stmt_expression.expr;
+                            TSNode expr_node = ts_node_named_child(stmt_node, 0);
+                            lower_expression(expr, src, expr_node);
+                            break;
+                        }
+
+                        default:
+                            dbg_node_named(stmt_node);
+                            break;
                     }
                 }
 
                 break;
             }
+
+            default:
+                dbg_node_named(node);
+                break;
         }
     }
 
@@ -305,8 +388,8 @@ void lower_unit(struct Unit* unit, const char* src) {
     printf("------------------------\n");
 #endif
 
-    // ts_tree_delete(tree);
-    // ts_parser_delete(parser);
+    ts_tree_delete(tree);
+    ts_parser_delete(parser);
 }
 
 #endif

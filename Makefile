@@ -1,6 +1,7 @@
 CC=gcc
 
-CFLAGS=-c -Wall -g
+FLAGS=
+CFLAGS=-c -Wall -g $(FLAGS)
 LDFLAGS=
 
 EXECUTABLE=cfcc

@@ -5,7 +5,9 @@
     * return
 - expressions
     * literals
-    * ~~function calls~~
+    * function calls
+    * variable access
+    * variable assign
     * ~~locals & arguments~~
     * math operations
 - types

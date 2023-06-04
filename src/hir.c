@@ -10,7 +10,7 @@
 
 // Common types
 struct Variable {
-    const char* name;
+    const char* identifier;
     struct Type* type;
 };
 
@@ -19,10 +19,10 @@ struct Function;
 struct Scope {
     struct Scope* outer;
 
-    struct Function* functions;
+    struct Function** functions;
     size_t functions_length;
     
-    struct Variable* variables;
+    struct Variable** variables;
     size_t variables_length;
 };
 
@@ -30,14 +30,14 @@ struct Scope {
 struct Function {
     char* identifier;
     
-    struct Variable* params;
+    struct Variable** params;
     size_t params_length;
 
     struct Type* return_type;
 
     struct Scope scope;
 
-    struct Statement* body;
+    struct Statement** body;
     size_t body_length;
 };
 
@@ -65,7 +65,7 @@ struct ExprLiteral {
 struct ExprCall {
     struct Function* func;
 
-    struct Expression* args;
+    struct Expression** args;
     size_t args_length;
 };
 
@@ -200,24 +200,46 @@ enum BinaryOperation parse_binary_op(char* str) {
         return -1;
 }
 
+struct Function* find_func(char* identifier, struct Scope* scope) {
+    for (int i = 0; i < scope->functions_length; i++) {
+        if (strcmp(identifier, scope->functions[i]->identifier) == 0) {
+            return scope->functions[i];
+        }
+    }
+
+    if (scope->outer != NULL) {
+        return find_func(identifier, scope->outer);
+    }
+
+    return NULL;
+}
+
+struct Variable* find_var(char* identifier, struct Scope* scope) {
+    for (int i = 0; i < scope->variables_length; i++) {
+        if (strcmp(identifier, scope->variables[i]->identifier) == 0) {
+            return scope->variables[i];
+        }
+    }
+
+    if (scope->outer != NULL) {
+        return find_var(identifier, scope->outer);
+    }
+
+    return NULL;
+}
+
 // ast -> hir
 void lower_expression(struct Expression* expr, struct Scope* scope, const char* src, TSNode node) {
     switch (ts_node_symbol(node)) {
         case sym_call_expression: {
             expr->kind = EXPR_CALL;
-            expr->expr_call.func = NULL;
             
             TSNode ident_node = ts_node_named_child(node, 0);
             char* identifier = tsnstr(src, ident_node);
-            for (int i = 0; i < scope->functions_length; i++) {
-                if (strcmp(identifier, scope->functions[i].identifier) == 0) {
-                    expr->expr_call.func = &scope->functions[i];
-                    break;
-                }
-            }
-
+            expr->expr_call.func = find_func(identifier, scope);
+            
             if (expr->expr_call.func == NULL) {
-                printf("function `%s` not found", identifier);
+                printf("function `%s` not found\n", identifier);
             }
 
             // TODO: args
@@ -228,6 +250,32 @@ void lower_expression(struct Expression* expr, struct Scope* scope, const char* 
         }
         
         case sym_identifier: {
+            expr->kind = EXPR_VARIABLE;
+
+            char* identifier = tsnstr(src, node);
+            expr->expr_variable.variable = find_var(identifier, scope);
+            
+            if (expr->expr_variable.variable == NULL) {
+                printf("variable `%s` not found\n", identifier);
+            }
+
+            
+            break;
+        }
+
+        case sym_assignment_expression: {
+            expr->kind = EXPR_ASSIGNMENT;
+
+            char* identifier = tsnstr(src, ts_node_named_child(node, 0));
+            expr->expr_assignment.variable = find_var(identifier, scope);
+            
+            if (expr->expr_assignment.variable == NULL) {
+                printf("variable `%s` not found\n", identifier);
+            }
+
+            TSNode value_node = ts_node_named_child(node, 1);
+            expr->expr_assignment.expression = malloc(sizeof(struct Expression));
+            lower_expression(expr->expr_assignment.expression, scope, src, value_node);
             
             break;
         }
@@ -290,25 +338,25 @@ void lower_expression(struct Expression* expr, struct Scope* scope, const char* 
 struct Statement* append_stmt(struct Function* func) {
     func->body_length += 1;
     func->body = realloc(func->body, sizeof(struct Statement) * func->body_length);
-    return &func->body[func->body_length - 1];
+    return func->body[func->body_length - 1] = malloc(sizeof(struct Statement));
 }
 
 struct Function* append_func(struct Scope* scope) {
     scope->functions_length += 1;
     scope->functions = realloc(scope->functions, sizeof(struct Function) * scope->functions_length);
-    return &scope->functions[scope->functions_length - 1];
+    return scope->functions[scope->functions_length - 1] = malloc(sizeof(struct Function));
 }
 
 struct Variable* append_var(struct Function* func) {
     func->scope.variables_length += 1;
     func->scope.variables = realloc(func->scope.variables, sizeof(struct Variable) * func->scope.variables_length);
-    return &func->scope.variables[func->scope.variables_length - 1];
+    return func->scope.variables[func->scope.variables_length - 1] = malloc(sizeof(struct Variable));
 }
 
 struct Variable* append_param(struct Function* func) {
     func->params_length += 1;
     func->params = realloc(func->params, sizeof(struct Variable) * func->params_length);
-    return &func->params[func->params_length - 1];
+    return func->params[func->params_length - 1] = malloc(sizeof(struct Variable));
 }
 
 void lower_unit(struct Unit* unit, const char* src) {
@@ -337,6 +385,10 @@ void lower_unit(struct Unit* unit, const char* src) {
                 TSNode func_body_node = ts_node_named_child(node, 2);
                 
                 struct Function* func = append_func(&unit->scope);
+                func->scope.outer = &unit->scope;
+                func->scope.functions_length = 0;
+                func->scope.variables_length = 0;
+                
                 func->scope.variables = NULL;
                 func->scope.variables_length = 0;
                 func->params = NULL;
@@ -361,7 +413,7 @@ void lower_unit(struct Unit* unit, const char* src) {
                     lower_type(src, param_type_node, type);
                     
                     struct Variable* param = append_param(func);
-                    param->name = tsnstr(src, param_ident_node);
+                    param->identifier = tsnstr(src, param_ident_node);
                     param->type = type;
                 }
                 
@@ -375,18 +427,18 @@ void lower_unit(struct Unit* unit, const char* src) {
 
                             struct Expression* expr = &stmt->stmt_return.expr;
                             TSNode expr_node = ts_node_named_child(stmt_node, 0);
-                            lower_expression(expr, &unit->scope, src, expr_node);
+                            lower_expression(expr, &func->scope, src, expr_node);
                             break;
                         }
 
                         case sym_declaration: {
-                            TSNode decl_type_node = ts_node_named_child(node, 0);
-                            TSNode decl_ident_node = ts_node_named_child(node, 1);
+                            TSNode decl_type_node = ts_node_named_child(stmt_node, 0);
+                            TSNode decl_ident_node = ts_node_named_child(stmt_node, 1);
                             struct Type* type = malloc(sizeof(struct Type));
                             lower_type(src, decl_type_node, type);
                             
                             struct Variable* local = append_var(func);
-                            local->name = tsnstr(src, decl_ident_node);
+                            local->identifier = tsnstr(src, decl_ident_node);
                             local->type = type;
                             break;
                         }
@@ -397,7 +449,7 @@ void lower_unit(struct Unit* unit, const char* src) {
 
                             struct Expression* expr = &stmt->stmt_expression.expr;
                             TSNode expr_node = ts_node_named_child(stmt_node, 0);
-                            lower_expression(expr, &unit->scope, src, expr_node);
+                            lower_expression(expr, &func->scope, src, expr_node);
                             break;
                         }
 

@@ -78,16 +78,39 @@ void free_register(struct RegisterAllocator* registers, size_t idx) {
     registers->scratch_state[idx] = 0;
 }
 
-size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Context* ctx, char** buffer) {    
+size_t calc_var_offset(struct Function* func, struct Variable* var) {
+    size_t offset = 0;
+    for (int i = 0; i < func->params_length; i++) {
+        offset += type_size(func->params[i]->type);
+        if (var == func->params[i]) {
+            return offset;
+        }
+    }
+    
+    for (int i = 0; i < func->scope.variables_length; i++) {
+        offset += type_size(func->scope.variables[i]->type);
+        if (var == func->scope.variables[i]) {
+            return offset;
+        }
+    }
+
+    printf("failed to find var %s", var->identifier);
+}
+
+size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Function* func, struct Context* ctx, char** buffer) {    
     switch (expr->kind) {
         case EXPR_VARIABLE: {
             size_t r = alloc_register(&ctx->allocator);
-            strfmt(buffer, "\tmovl -%i(%%rbp), %%%sd\n", 4, ctx->allocator.scratch[r]);
+            size_t offset = calc_var_offset(func, expr->expr_variable.variable);
+            strfmt(buffer, "\tmovl -%i(%%rbp), %%%sd\n", offset, ctx->allocator.scratch[r]);
             return r;
         }
 
         case EXPR_ASSIGNMENT: {
-            break;
+            size_t r = generate_expr(expr->expr_assignment.expression, scope, func, ctx, buffer);
+            size_t offset = calc_var_offset(func, expr->expr_assignment.variable);
+            strfmt(buffer, "\tmovl %%%sd, -%i(%%rbp)\n", ctx->allocator.scratch[r], offset);
+            return r;
         }
 
         case EXPR_LITERAL: {
@@ -95,6 +118,10 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Contex
             switch (lit->type->kind) {
                 case TYPE_KIND_BASIC: {
                     switch (lit->type->basic) {
+                        case TYPE_VOID: {
+                            break;
+                        }
+
                         case TYPE_I32: {
                             size_t r = alloc_register(&ctx->allocator);
                             strfmt(buffer, "\tmovl $%s, %%%sd\n", expr->expr_literal.value, ctx->allocator.scratch[r]);
@@ -104,7 +131,7 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Contex
                         // TODO:
                         case TYPE_F32:
                             break;
-                    }
+                        }
                     break;
                 }
 
@@ -169,8 +196,8 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Contex
 
         case EXPR_BIN_OP: {
             struct ExprBinaryOp* bin_op = &expr->expr_binary_op;
-            size_t r1 = generate_expr(bin_op->left, scope, ctx, buffer);
-            size_t r2 = generate_expr(bin_op->right, scope, ctx, buffer);
+            size_t r1 = generate_expr(bin_op->left, scope, func, ctx, buffer);
+            size_t r2 = generate_expr(bin_op->right, scope, func, ctx, buffer);
             switch (bin_op->kind) {
                 case BINARY_OP_ADD:
                     strfmt(buffer, "\taddl %%%sd, %%%sd\n", ctx->allocator.scratch[r2], ctx->allocator.scratch[r1]);
@@ -209,7 +236,7 @@ char* generate(struct Unit* unit, struct Context* ctx) {
     );
 
     for (int i = 0; i < unit->scope.functions_length; i++) {
-        struct Function* func = &unit->scope.functions[i];
+        struct Function* func = unit->scope.functions[i];
         strfmt(&buffer, "\n%s:\n", func->identifier);
 
         // save prevoius base pointer
@@ -219,8 +246,8 @@ char* generate(struct Unit* unit, struct Context* ctx) {
         strapp(&buffer, "\tmovq %rsp, %rbp\n");
 
         size_t frame_size = 0; // calculate stack frame size
-        for (int j = 0; j < func->params_length; j++) frame_size += type_size(func->params[j].type);
-        for (int j = 0; j < func->scope.variables_length; j++) frame_size += type_size(func->scope.variables[j].type);
+        for (int j = 0; j < func->params_length; j++) frame_size += type_size(func->params[j]->type);
+        for (int j = 0; j < func->scope.variables_length; j++) frame_size += type_size(func->scope.variables[j]->type);
 
         // align stack frame to 16 bytes
         if (frame_size % 16 != 0) {
@@ -232,10 +259,10 @@ char* generate(struct Unit* unit, struct Context* ctx) {
 
         // generate statements
         for (int j = 0; j < func->body_length; j++) {
-            struct Statement* stmt = &func->body[j];
+            struct Statement* stmt = func->body[j];
             switch (stmt->kind) {
                 case STMT_RETURN: {
-                    size_t r = generate_expr(&stmt->stmt_return.expr, &unit->scope, ctx, &buffer);
+                    size_t r = generate_expr(&stmt->stmt_return.expr, &unit->scope, func, ctx, &buffer);
                     strfmt(&buffer, "\tmovl %%%sd, %%eax\n", ctx->allocator.scratch[r]);
                     free_register(&ctx->allocator, r);
 
@@ -247,7 +274,7 @@ char* generate(struct Unit* unit, struct Context* ctx) {
                 }
 
                 case STMT_EXPRESSION: {
-                    size_t r = generate_expr(&stmt->stmt_expression.expr, &unit->scope, ctx, &buffer);
+                    size_t r = generate_expr(&stmt->stmt_expression.expr, &unit->scope, func, ctx, &buffer);
                     free_register(&ctx->allocator, r);
                     break;
                 }

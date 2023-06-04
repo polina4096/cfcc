@@ -57,6 +57,7 @@ struct RegisterAllocator {
 
 struct Context {
     struct RegisterAllocator allocator;
+    size_t free_label;
     size_t frame_size;
 };
 
@@ -278,14 +279,30 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Functi
     return -1;
 }
 
+void generate_statement(struct Statement* stmt, struct Scope* scope, struct Function* func, struct Context* ctx, char** buffer);
+
+void generate_scope(struct Scope* scope, struct Function* func, struct Context* ctx, char** buffer) {
+    for (int i = 0; i < scope->statements_length; i++) {
+        struct Statement* stmt = scope->statements[i];
+        generate_statement(stmt, scope, func, ctx, buffer);
+    }
+}
+
 void generate_statement(struct Statement* stmt, struct Scope* scope, struct Function* func, struct Context* ctx, char** buffer) {
     switch (stmt->kind) {
         case STMT_COMPOUND: {
             struct Scope* compound_scope = &stmt->stmt_compound.scope;
-            for (int i = 0; i < compound_scope->statements_length; i++) {
-                struct Statement* stmt = compound_scope->statements[i];
-                generate_statement(stmt, compound_scope, func, ctx, buffer);
-            }
+            generate_scope(compound_scope, func, ctx, buffer);
+            break;
+        }
+        
+        case STMT_IF: {
+            size_t r = generate_expr(&stmt->stmt_if.condition_expr, scope, func, ctx, buffer);
+            strfmt(buffer, "\tcmpl $1, %%%sd\n", ctx->allocator.scratch[r]);
+            strfmt(buffer, "\tjne .L%zu\n", ctx->free_label);
+            generate_scope(&stmt->stmt_if.success_scope, func, ctx, buffer);
+            strfmt(buffer, ".L%zu:\n", ctx->free_label);
+            ctx->free_label += 1;
             break;
         }
 
@@ -294,10 +311,10 @@ void generate_statement(struct Statement* stmt, struct Scope* scope, struct Func
             strfmt(buffer, "\tmovl %%%sd, %%eax\n", ctx->allocator.scratch[r]);
             free_register(&ctx->allocator, r);
 
-            strfmt(buffer, "\taddq $%zu, %%rsp\n", ctx->frame_size);
-
-            strapp(buffer, "\tpopq %rbp\n");
-            strapp(buffer, "\tretq\n");
+            strfmt(buffer, "\tjmp .%s_exit\n", func->identifier);
+            // strfmt(buffer, "\taddq $%zu, %%rsp\n", ctx->frame_size);
+            // strapp(buffer, "\tpopq %rbp\n");
+            // strapp(buffer, "\tretq\n");
             break;
         }
 
@@ -327,10 +344,9 @@ char* generate(struct Unit* unit, struct Context* ctx) {
         "\t.text\n"
         "\t.globl main\n"
         "\t.type  main, @function\n"
-        "\n"
-        ".LC0:\n"
-        "\t.string \"%d\\n\"\n"
     );
+
+    ctx->free_label = 0;
 
     for (int i = 0; i < unit->scope.functions_length; i++) {
         free_all_registers(&ctx->allocator);
@@ -343,9 +359,9 @@ char* generate(struct Unit* unit, struct Context* ctx) {
         // load current stack position as base
         strapp(&buffer, "\tmovq %rsp, %rbp\n");
 
-        ctx->frame_size = 0; // calculate stack frame size
-        for (int j = 0; j < func->params_length; j++) ctx->frame_size += type_size(func->params[j]->type);
+        // calculate stack frame size
         ctx->frame_size = calc_scope_frame_size(&func->scope);
+        for (int j = 0; j < func->params_length; j++) ctx->frame_size += type_size(func->params[j]->type);
 
         // align stack frame to 16 bytes
         if (ctx->frame_size % 16 != 0) {
@@ -366,6 +382,9 @@ char* generate(struct Unit* unit, struct Context* ctx) {
             struct Statement* stmt = func->scope.statements[j];
             generate_statement(stmt, &func->scope, func, ctx, &buffer);
         }
+
+        // add exit label (avoids code duplication, adds one jump)
+        strfmt(&buffer, ".%s_exit:\n", func->identifier);
 
         // free stack space for locals and parameters
         strfmt(&buffer, "\taddq $%zu, %%rsp\n", ctx->frame_size);

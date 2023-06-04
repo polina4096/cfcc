@@ -117,6 +117,11 @@ struct StmtCompound {
     struct Scope scope;
 };
 
+struct StmtIf {
+    struct Expression condition_expr;
+    struct Scope success_scope;
+};
+
 struct StmtReturn {
     struct Expression expr;
 };
@@ -127,6 +132,7 @@ struct StmtExpression {
 
 enum StatementKind {
     STMT_COMPOUND,
+    STMT_IF,
     STMT_RETURN,
     STMT_EXPRESSION,
 };
@@ -135,6 +141,7 @@ struct Statement {
     enum StatementKind kind;
     union {
         struct StmtCompound stmt_compound;
+        struct StmtIf stmt_if;
         struct StmtReturn stmt_return;
         struct StmtExpression stmt_expression;
     };
@@ -181,7 +188,7 @@ void dbg_node_named(TSNode node) {
     return;
 #endif
 
-    printf("\n%i %s\n\t- children -\n", ts_node_symbol(node), ts_node_type(node));
+    printf("\n%i %s\n", ts_node_symbol(node), ts_node_type(node));
     if (ts_node_named_child_count(node) > 0) {
         printf("\t- children -\n");
         print_named_nodes(node);
@@ -433,6 +440,33 @@ void lower_statement(struct Scope* scope, const char* src, TSNode node) {
                 lower_statement(compound_scope, src, stmt_node);
             }
 
+            break;
+        }
+
+        case sym_if_statement: {
+            struct Statement* stmt = append_stmt(scope);
+            stmt->kind = STMT_IF;
+            
+            struct Scope* success_scope = &stmt->stmt_if.success_scope;
+
+            success_scope->outer = scope;
+            success_scope->functions_length = 0;
+            success_scope->variables_length = 0;
+            success_scope->statements_length = 0;
+
+            success_scope->functions = NULL;
+            success_scope->variables = NULL;
+            success_scope->statements = NULL;
+            
+            success_scope->variables = NULL;
+            success_scope->variables_length = 0;
+
+            TSNode condition_expr_node = ts_node_named_child(node, 0);
+            struct Expression* condition_expr = &stmt->stmt_if.condition_expr;
+            lower_expression(condition_expr, scope, src, condition_expr_node);
+
+            TSNode success_compound_node = ts_node_named_child(node, 1);
+            lower_statement(success_scope, src, success_compound_node);
             break;
         }
 

@@ -1,7 +1,6 @@
 ## Implemented features
 ### code generation
-- top level
-    - function definitions
+- function definitions
     - statements
         * return
         * expression

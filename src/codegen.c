@@ -263,12 +263,6 @@ char* generate(struct Unit* unit, struct Context* ctx) {
         // load current stack position as base
         strapp(&buffer, "\tmovq %rsp, %rbp\n");
 
-        // store function arguments
-        for (int j = 0; j < func->params_length; j++) {
-            size_t offset = calc_var_offset(func, func->params[j]);
-            strfmt(&buffer, "\tmovl %%e%s, -%i(%%rbp)\n", ctx->allocator.argument[j], offset);
-        }
-
         size_t frame_size = 0; // calculate stack frame size
         for (int j = 0; j < func->params_length; j++) frame_size += type_size(func->params[j]->type);
         for (int j = 0; j < func->scope.variables_length; j++) frame_size += type_size(func->scope.variables[j]->type);
@@ -280,6 +274,12 @@ char* generate(struct Unit* unit, struct Context* ctx) {
 
         // allocate stack space for locals and parameters
         strfmt(&buffer, "\tsubq $%zu, %%rsp\n", frame_size);
+
+        // store function arguments
+        for (int j = 0; j < func->params_length; j++) {
+            size_t offset = calc_var_offset(func, func->params[j]);
+            strfmt(&buffer, "\tmovl %%e%s, -%i(%%rbp)\n", ctx->allocator.argument[j], offset);
+        }
 
         // generate statements
         for (int j = 0; j < func->body_length; j++) {

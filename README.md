@@ -2,6 +2,7 @@
 ### code generation
 - function definitions
     - statements
+        * compound
         * return
         * expression
     - expressions

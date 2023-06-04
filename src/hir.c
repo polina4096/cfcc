@@ -24,6 +24,9 @@ struct Scope {
     
     struct Variable** variables;
     size_t variables_length;
+
+    struct Statement** statements;
+    size_t statements_length;
 };
 
 
@@ -36,9 +39,6 @@ struct Function {
     struct Type* return_type;
 
     struct Scope scope;
-
-    struct Statement** body;
-    size_t body_length;
 };
 
 // Compilation Unit
@@ -102,6 +102,10 @@ struct Expression {
 };
 
 // Statements
+struct StmtCompound {
+    struct Scope* scope;
+};
+
 struct StmtReturn {
     struct Expression expr;
 };
@@ -111,6 +115,7 @@ struct StmtExpression {
 };
 
 enum StatementKind {
+    STMT_COMPOUND,
     STMT_RETURN,
     STMT_EXPRESSION,
 };
@@ -118,6 +123,7 @@ enum StatementKind {
 struct Statement {
     enum StatementKind kind;
     union {
+        struct StmtCompound stmt_compound;
         struct StmtReturn stmt_return;
         struct StmtExpression stmt_expression;
     };
@@ -229,10 +235,10 @@ struct Variable* find_var(char* identifier, struct Scope* scope) {
 }
 
 // list helper functions
-struct Statement* append_stmt(struct Function* func) {
-    func->body_length += 1;
-    func->body = realloc(func->body, sizeof(struct Statement) * func->body_length);
-    return func->body[func->body_length - 1] = malloc(sizeof(struct Statement));
+struct Statement* append_stmt(struct Scope* scope) {
+    scope->statements_length += 1;
+    scope->statements = realloc(scope->statements, sizeof(struct Statement) * scope->statements_length);
+    return scope->statements[scope->statements_length - 1] = malloc(sizeof(struct Statement));
 }
 
 struct Expression* append_arg(struct ExprCall* call_expr) {
@@ -247,10 +253,10 @@ struct Function* append_func(struct Scope* scope) {
     return scope->functions[scope->functions_length - 1] = malloc(sizeof(struct Function));
 }
 
-struct Variable* append_var(struct Function* func) {
-    func->scope.variables_length += 1;
-    func->scope.variables = realloc(func->scope.variables, sizeof(struct Variable) * func->scope.variables_length);
-    return func->scope.variables[func->scope.variables_length - 1] = malloc(sizeof(struct Variable));
+struct Variable* append_var(struct Scope* scope) {
+    scope->variables_length += 1;
+    scope->variables = realloc(scope->variables, sizeof(struct Variable) * scope->variables_length);
+    return scope->variables[scope->variables_length - 1] = malloc(sizeof(struct Variable));
 }
 
 struct Variable* append_param(struct Function* func) {
@@ -373,6 +379,74 @@ void lower_expression(struct Expression* expr, struct Scope* scope, const char* 
     }
 }
 
+void lower_statement(struct Scope* scope, const char* src, TSNode node) {
+    switch (ts_node_symbol(node)) {
+        case sym_compound_statement: {
+            struct Statement* stmt = append_stmt(scope);
+            stmt->kind = STMT_COMPOUND;
+
+            struct Scope* compound_scope = malloc(sizeof(struct Scope));
+            compound_scope->outer = scope;
+            compound_scope->functions_length = 0;
+            compound_scope->variables_length = 0;
+            compound_scope->statements_length = 0;
+
+            compound_scope->functions = NULL;
+            compound_scope->variables = NULL;
+            compound_scope->statements = NULL;
+            
+            compound_scope->variables = NULL;
+            compound_scope->variables_length = 0;
+
+            stmt->stmt_compound.scope = compound_scope;
+
+            size_t cmpd_stmt_node_children_length = ts_node_named_child_count(node);
+            for (int i = 0; i < cmpd_stmt_node_children_length; i++) {
+                TSNode stmt_node = ts_node_named_child(node, i);
+                lower_statement(compound_scope, src, stmt_node);
+            }
+
+            break;
+        }
+
+        case sym_return_statement: {
+            struct Statement* stmt = append_stmt(scope);
+            stmt->kind = STMT_RETURN;
+
+            struct Expression* expr = &stmt->stmt_return.expr;
+            TSNode expr_node = ts_node_named_child(node, 0);
+            lower_expression(expr, scope, src, expr_node);
+            break;
+        }
+
+        case sym_declaration: {
+            TSNode decl_type_node = ts_node_named_child(node, 0);
+            TSNode decl_ident_node = ts_node_named_child(node, 1);
+            struct Type* type = malloc(sizeof(struct Type));
+            lower_type(src, decl_type_node, type);
+            
+            struct Variable* local = append_var(scope);
+            local->identifier = tsnstr(src, decl_ident_node);
+            local->type = type;
+            break;
+        }
+
+        case sym_expression_statement: {
+            struct Statement* stmt = append_stmt(scope);
+            stmt->kind = STMT_EXPRESSION;
+
+            struct Expression* expr = &stmt->stmt_expression.expr;
+            TSNode expr_node = ts_node_named_child(node, 0);
+            lower_expression(expr, scope, src, expr_node);
+            break;
+        }
+
+        default:
+            dbg_node_named(node);
+            break;
+    }
+}
+
 void lower_unit(struct Unit* unit, const char* src) {
     unit->scope.functions_length = 0;
     unit->scope.variables_length = 0;
@@ -396,19 +470,23 @@ void lower_unit(struct Unit* unit, const char* src) {
             case sym_function_definition: {
                 TSNode func_return_type_node = ts_node_named_child(node, 0);
                 TSNode func_declarator_node = ts_node_named_child(node, 1);
-                TSNode func_body_node = ts_node_named_child(node, 2);
+                TSNode func_cmpd_stmt_node = ts_node_named_child(node, 2);
                 
                 struct Function* func = append_func(&unit->scope);
                 func->scope.outer = &unit->scope;
                 func->scope.functions_length = 0;
                 func->scope.variables_length = 0;
+                func->scope.statements_length = 0;
+
+                func->scope.functions = NULL;
+                func->scope.variables = NULL;
+                func->scope.statements = NULL;
                 
                 func->scope.variables = NULL;
                 func->scope.variables_length = 0;
+
                 func->params = NULL;
                 func->params_length = 0;
-                func->body = NULL;
-                func->body_length = 0;
 
                 struct Type* type = malloc(sizeof(struct Type));
                 lower_type(src, func_return_type_node, type);
@@ -431,46 +509,10 @@ void lower_unit(struct Unit* unit, const char* src) {
                     param->type = type;
                 }
                 
-                size_t func_body_node_children_length = ts_node_named_child_count(func_body_node);
-                for (int j = 0; j < func_body_node_children_length; j++) {
-                    TSNode stmt_node = ts_node_named_child(func_body_node, j);
-                    switch (ts_node_symbol(stmt_node)) {
-                        case sym_return_statement: {
-                            struct Statement* stmt = append_stmt(func);
-                            stmt->kind = STMT_RETURN;
-
-                            struct Expression* expr = &stmt->stmt_return.expr;
-                            TSNode expr_node = ts_node_named_child(stmt_node, 0);
-                            lower_expression(expr, &func->scope, src, expr_node);
-                            break;
-                        }
-
-                        case sym_declaration: {
-                            TSNode decl_type_node = ts_node_named_child(stmt_node, 0);
-                            TSNode decl_ident_node = ts_node_named_child(stmt_node, 1);
-                            struct Type* type = malloc(sizeof(struct Type));
-                            lower_type(src, decl_type_node, type);
-                            
-                            struct Variable* local = append_var(func);
-                            local->identifier = tsnstr(src, decl_ident_node);
-                            local->type = type;
-                            break;
-                        }
-
-                        case sym_expression_statement: {
-                            struct Statement* stmt = append_stmt(func);
-                            stmt->kind = STMT_EXPRESSION;
-
-                            struct Expression* expr = &stmt->stmt_expression.expr;
-                            TSNode expr_node = ts_node_named_child(stmt_node, 0);
-                            lower_expression(expr, &func->scope, src, expr_node);
-                            break;
-                        }
-
-                        default:
-                            dbg_node_named(stmt_node);
-                            break;
-                    }
+                size_t func_cmpd_stmt_node_children_length = ts_node_named_child_count(func_cmpd_stmt_node);
+                for (int j = 0; j < func_cmpd_stmt_node_children_length; j++) {
+                    TSNode stmt_node = ts_node_named_child(func_cmpd_stmt_node, j);
+                    lower_statement(&func->scope, src, stmt_node);
                 }
 
                 break;

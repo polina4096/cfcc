@@ -57,6 +57,7 @@ struct RegisterAllocator {
 
 struct Context {
     struct RegisterAllocator allocator;
+    size_t frame_size;
 };
 
 size_t alloc_register(struct RegisterAllocator* registers) {
@@ -84,38 +85,41 @@ void free_all_registers(struct RegisterAllocator* registers) {
     }
 }
 
-size_t calc_var_offset(struct Function* func, struct Variable* var) {
+size_t calc_var_offset(struct Scope* scope, struct Variable* var, bool* found) {
     size_t offset = 0;
-    for (int i = 0; i < func->params_length; i++) {
-        offset += type_size(func->params[i]->type);
-        if (var == func->params[i]) {
-            return offset;
-        }
-    }
-    
-    for (int i = 0; i < func->scope.variables_length; i++) {
-        offset += type_size(func->scope.variables[i]->type);
-        if (var == func->scope.variables[i]) {
+    for (int i = 0; i < scope->variables_length; i++) {
+        offset += type_size(scope->variables[i]->type);
+        if (var == scope->variables[i]) {
+            if (found != NULL) {
+                *found = true;
+            }
+
             return offset;
         }
     }
 
-    printf("failed to find var %s", var->identifier);
-    return -1;
+    for (int i = 0; i < scope->statements_length; i++) {
+        if (scope->statements[i]->kind == STMT_COMPOUND) {
+            size_t scope_offset = calc_var_offset(scope->statements[i]->stmt_compound.scope, var, found);
+            offset += scope_offset;
+        }
+    }
+
+    return offset;
 }
 
 size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Function* func, struct Context* ctx, char** buffer) {    
     switch (expr->kind) {
         case EXPR_VARIABLE: {
             size_t r = alloc_register(&ctx->allocator);
-            size_t offset = calc_var_offset(func, expr->expr_variable.variable);
+            size_t offset = calc_var_offset(&func->scope, expr->expr_variable.variable, NULL);
             strfmt(buffer, "\tmovl -%i(%%rbp), %%%sd\n", offset, ctx->allocator.scratch[r]);
             return r;
         }
 
         case EXPR_ASSIGNMENT: {
             size_t r = generate_expr(expr->expr_assignment.expression, scope, func, ctx, buffer);
-            size_t offset = calc_var_offset(func, expr->expr_assignment.variable);
+            size_t offset = calc_var_offset(&func->scope, expr->expr_assignment.variable, NULL);
             strfmt(buffer, "\tmovl %%%sd, -%i(%%rbp)\n", ctx->allocator.scratch[r], offset);
             return r;
         }
@@ -241,6 +245,37 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Functi
     return -1;
 }
 
+void generate_statement(struct Statement* stmt, struct Scope* scope, struct Function* func, struct Context* ctx, char** buffer) {
+    switch (stmt->kind) {
+        case STMT_COMPOUND: {
+            struct Scope* compound_scope = stmt->stmt_compound.scope;
+            for (int i = 0; i < compound_scope->statements_length; i++) {
+                struct Statement* stmt = compound_scope->statements[i];
+                generate_statement(stmt, compound_scope, func, ctx, buffer);
+            }
+            break;
+        }
+
+        case STMT_RETURN: {
+            size_t r = generate_expr(&stmt->stmt_return.expr, scope, func, ctx, buffer);
+            strfmt(buffer, "\tmovl %%%sd, %%eax\n", ctx->allocator.scratch[r]);
+            free_register(&ctx->allocator, r);
+
+            strfmt(buffer, "\taddq $%zu, %%rsp\n", ctx->frame_size);
+
+            strapp(buffer, "\tpopq %rbp\n");
+            strapp(buffer, "\tretq\n");
+            break;
+        }
+
+        case STMT_EXPRESSION: {
+            size_t r = generate_expr(&stmt->stmt_expression.expr, scope, func, ctx, buffer);
+            free_register(&ctx->allocator, r);
+            break;
+        }
+    }
+}
+
 char* generate(struct Unit* unit, struct Context* ctx) {
     char* buffer = NULL;
     strapp(&buffer,
@@ -263,50 +298,32 @@ char* generate(struct Unit* unit, struct Context* ctx) {
         // load current stack position as base
         strapp(&buffer, "\tmovq %rsp, %rbp\n");
 
-        size_t frame_size = 0; // calculate stack frame size
-        for (int j = 0; j < func->params_length; j++) frame_size += type_size(func->params[j]->type);
-        for (int j = 0; j < func->scope.variables_length; j++) frame_size += type_size(func->scope.variables[j]->type);
+        ctx->frame_size = 0; // calculate stack frame size
+        for (int j = 0; j < func->params_length; j++) ctx->frame_size += type_size(func->params[j]->type);
+        for (int j = 0; j < func->scope.variables_length; j++) ctx->frame_size += type_size(func->scope.variables[j]->type);
 
         // align stack frame to 16 bytes
-        if (frame_size % 16 != 0) {
-            frame_size += 16 - frame_size % 16;
+        if (ctx->frame_size % 16 != 0) {
+            ctx->frame_size += 16 - ctx->frame_size % 16;
         }
 
         // allocate stack space for locals and parameters
-        strfmt(&buffer, "\tsubq $%zu, %%rsp\n", frame_size);
+        strfmt(&buffer, "\tsubq $%zu, %%rsp\n", ctx->frame_size);
 
         // store function arguments
         for (int j = 0; j < func->params_length; j++) {
-            size_t offset = calc_var_offset(func, func->params[j]);
+            size_t offset = calc_var_offset(&func->scope, func->params[j], NULL);
             strfmt(&buffer, "\tmovl %%e%s, -%i(%%rbp)\n", ctx->allocator.argument[j], offset);
         }
 
         // generate statements
-        for (int j = 0; j < func->body_length; j++) {
-            struct Statement* stmt = func->body[j];
-            switch (stmt->kind) {
-                case STMT_RETURN: {
-                    size_t r = generate_expr(&stmt->stmt_return.expr, &unit->scope, func, ctx, &buffer);
-                    strfmt(&buffer, "\tmovl %%%sd, %%eax\n", ctx->allocator.scratch[r]);
-                    free_register(&ctx->allocator, r);
-
-                    strfmt(&buffer, "\taddq $%zu, %%rsp\n", frame_size);
-
-                    strapp(&buffer, "\tpopq %rbp\n");
-                    strapp(&buffer, "\tretq\n");
-                    break;
-                }
-
-                case STMT_EXPRESSION: {
-                    size_t r = generate_expr(&stmt->stmt_expression.expr, &unit->scope, func, ctx, &buffer);
-                    free_register(&ctx->allocator, r);
-                    break;
-                }
-            }
+        for (int j = 0; j < func->scope.statements_length; j++) {
+            struct Statement* stmt = func->scope.statements[j];
+            generate_statement(stmt, &func->scope, func, ctx, &buffer);
         }
 
         // free stack space for locals and parameters
-        strfmt(&buffer, "\taddq $%zu, %%rsp\n", frame_size);
+        strfmt(&buffer, "\taddq $%zu, %%rsp\n", ctx->frame_size);
 
         strapp(&buffer, "\tpopq %rbp\n");
         strapp(&buffer, "\tretq\n");

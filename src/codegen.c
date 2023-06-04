@@ -108,6 +108,12 @@ size_t calc_var_offset(struct Scope* scope, struct Variable* var, bool* found) {
     return offset;
 }
 
+void generate_logical_op(const char* suffix, size_t r1, size_t r2, struct Context* ctx, char** buffer) {
+    strfmt(buffer, "\tcmpl %%%sd, %%%sd\n", ctx->allocator.scratch[r2], ctx->allocator.scratch[r1]);
+    strfmt(buffer, "\tset%s %%%sb\n", suffix, ctx->allocator.scratch[r1]);
+    strfmt(buffer, "\tmovzbl %%%sb, %%%sd\n", ctx->allocator.scratch[r1], ctx->allocator.scratch[r1]);
+}
+
 size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Function* func, struct Context* ctx, char** buffer) {    
     switch (expr->kind) {
         case EXPR_VARIABLE: {
@@ -220,6 +226,7 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Functi
             size_t r1 = generate_expr(bin_op->left, scope, func, ctx, buffer);
             size_t r2 = generate_expr(bin_op->right, scope, func, ctx, buffer);
             switch (bin_op->kind) {
+                // math
                 case BINARY_OP_ADD:
                     strfmt(buffer, "\taddl %%%sd, %%%sd\n", ctx->allocator.scratch[r2], ctx->allocator.scratch[r1]);
                     break;
@@ -235,7 +242,33 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Functi
                 case BINARY_OP_MUL:
                     strfmt(buffer, "\timull %%%sd, %%%sd\n", ctx->allocator.scratch[r2], ctx->allocator.scratch[r1]);
                     break;
-            }
+
+                // relational
+                case BINARY_OP_LT:
+                    generate_logical_op("l", r1, r2, ctx, buffer);
+                    break;
+
+                case BINARY_OP_GT:
+                    generate_logical_op("g", r1, r2, ctx, buffer);
+                    break;
+
+                case BINARY_OP_LET:
+                    generate_logical_op("le", r1, r2, ctx, buffer);
+                    break;
+
+                case BINARY_OP_GET:
+                    generate_logical_op("ge", r1, r2, ctx, buffer);
+                    break;
+
+                // equality
+                case BINARY_OP_EQ:
+                    generate_logical_op("e", r1, r2, ctx, buffer);
+                    break;
+
+                case BINARY_OP_NE:
+                    generate_logical_op("ne", r1, r2, ctx, buffer);
+                    break;
+                }
 
             free_register(&ctx->allocator, r2);
             return r1;

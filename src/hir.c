@@ -70,10 +70,21 @@ struct ExprCall {
 };
 
 enum BinaryOperation {
+    // math
     BINARY_OP_ADD,
     BINARY_OP_SUB,
     BINARY_OP_DIV,
     BINARY_OP_MUL,
+    
+    // relational
+    BINARY_OP_LT,
+    BINARY_OP_GT,
+    BINARY_OP_LET,
+    BINARY_OP_GET,
+
+    // equality
+    BINARY_OP_EQ,
+    BINARY_OP_NE,
 };
 
 struct ExprBinaryOp {
@@ -201,6 +212,24 @@ enum BinaryOperation parse_binary_op(char* str) {
     
     else if (strcmp(str, "/") == 0)
         return BINARY_OP_DIV;
+
+    else if (strcmp(str, "<") == 0)
+        return BINARY_OP_LT;
+
+    else if (strcmp(str, ">") == 0)
+        return BINARY_OP_GT;
+
+    else if (strcmp(str, "<=") == 0)
+        return BINARY_OP_LET;
+
+    else if (strcmp(str, ">=") == 0)
+        return BINARY_OP_GET;
+
+    else if (strcmp(str, "==") == 0)
+        return BINARY_OP_EQ;
+
+    else if (strcmp(str, "!=") == 0)
+        return BINARY_OP_NE;
 
     else
         return -1;

@@ -12,6 +12,10 @@ int add_x_ignore_y_add_1(int x, int y) {
 }
 
 int main() {
+    return 10 == 10;
+}
+
+int sixty_four() {
     int tewnty;
     tewnty = 20;
     
@@ -31,6 +35,8 @@ int test2() {
     int _4;
     int _5;
     int _6;
+
+    return 1;
 }
 
 int test() {
@@ -50,4 +56,6 @@ int test() {
     }
 
     int _6;
+
+    return 1;
 }

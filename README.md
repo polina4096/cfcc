@@ -2,13 +2,14 @@
 ### code generation
 - function definitions
     - statements
-        * compound
+        * compound (nested blocks)
         * return
         * expression
+        * if
     - expressions
         * literal
         * function call (up to 4 arguments)
-        * variable declaration initializers
+        * variable declaration initializer
         * variable access
         * variable assignment
         * math operations
@@ -16,6 +17,9 @@
             * subtraction
             * multiplication
             * ~~division~~
+        * logical operations
+            * relational
+            * equality
 - types
     * fundamental types
         * i32

@@ -78,6 +78,12 @@ void free_register(struct RegisterAllocator* registers, size_t idx) {
     registers->scratch_state[idx] = 0;
 }
 
+void free_all_registers(struct RegisterAllocator* registers) {
+    for (int i = 0; i < registers->scratch_count; i++) {
+        registers->scratch_state[i] = 0;
+    }
+}
+
 size_t calc_var_offset(struct Function* func, struct Variable* var) {
     size_t offset = 0;
     for (int i = 0; i < func->params_length; i++) {
@@ -236,6 +242,7 @@ char* generate(struct Unit* unit, struct Context* ctx) {
     );
 
     for (int i = 0; i < unit->scope.functions_length; i++) {
+        free_all_registers(&ctx->allocator);
         struct Function* func = unit->scope.functions[i];
         strfmt(&buffer, "\n%s:\n", func->identifier);
 

@@ -7,8 +7,7 @@
     * literals
     * function calls
     * variable access
-    * variable assign
-    * ~~locals & arguments~~
+    * variable assignment
     * math operations
 - types
     * fundamental types

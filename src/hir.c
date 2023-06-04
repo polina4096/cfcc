@@ -103,7 +103,7 @@ struct Expression {
 
 // Statements
 struct StmtCompound {
-    struct Scope* scope;
+    struct Scope scope;
 };
 
 struct StmtReturn {
@@ -385,7 +385,7 @@ void lower_statement(struct Scope* scope, const char* src, TSNode node) {
             struct Statement* stmt = append_stmt(scope);
             stmt->kind = STMT_COMPOUND;
 
-            struct Scope* compound_scope = malloc(sizeof(struct Scope));
+            struct Scope* compound_scope = &stmt->stmt_compound.scope;
             compound_scope->outer = scope;
             compound_scope->functions_length = 0;
             compound_scope->variables_length = 0;
@@ -397,8 +397,6 @@ void lower_statement(struct Scope* scope, const char* src, TSNode node) {
             
             compound_scope->variables = NULL;
             compound_scope->variables_length = 0;
-
-            stmt->stmt_compound.scope = compound_scope;
 
             size_t cmpd_stmt_node_children_length = ts_node_named_child_count(node);
             for (int i = 0; i < cmpd_stmt_node_children_length; i++) {

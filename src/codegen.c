@@ -100,7 +100,7 @@ size_t calc_var_offset(struct Scope* scope, struct Variable* var, bool* found) {
 
     for (int i = 0; i < scope->statements_length; i++) {
         if (scope->statements[i]->kind == STMT_COMPOUND) {
-            size_t scope_offset = calc_var_offset(scope->statements[i]->stmt_compound.scope, var, found);
+            size_t scope_offset = calc_var_offset(&scope->statements[i]->stmt_compound.scope, var, found);
             offset += scope_offset;
         }
     }
@@ -248,7 +248,7 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Functi
 void generate_statement(struct Statement* stmt, struct Scope* scope, struct Function* func, struct Context* ctx, char** buffer) {
     switch (stmt->kind) {
         case STMT_COMPOUND: {
-            struct Scope* compound_scope = stmt->stmt_compound.scope;
+            struct Scope* compound_scope = &stmt->stmt_compound.scope;
             for (int i = 0; i < compound_scope->statements_length; i++) {
                 struct Statement* stmt = compound_scope->statements[i];
                 generate_statement(stmt, compound_scope, func, ctx, buffer);
@@ -276,6 +276,18 @@ void generate_statement(struct Statement* stmt, struct Scope* scope, struct Func
     }
 }
 
+size_t calc_scope_frame_size(struct Scope* scope) {
+    size_t frame_size = 0;
+    for (int j = 0; j < scope->variables_length; j++) frame_size += type_size(scope->variables[j]->type);
+    for (int j = 0; j < scope->statements_length; j++) {
+        if (scope->statements[j]->kind == STMT_COMPOUND) {
+            frame_size += calc_scope_frame_size(&scope->statements[j]->stmt_compound.scope);
+        }
+    }
+
+    return frame_size;
+}
+
 char* generate(struct Unit* unit, struct Context* ctx) {
     char* buffer = NULL;
     strapp(&buffer,
@@ -300,7 +312,7 @@ char* generate(struct Unit* unit, struct Context* ctx) {
 
         ctx->frame_size = 0; // calculate stack frame size
         for (int j = 0; j < func->params_length; j++) ctx->frame_size += type_size(func->params[j]->type);
-        for (int j = 0; j < func->scope.variables_length; j++) ctx->frame_size += type_size(func->scope.variables[j]->type);
+        ctx->frame_size = calc_scope_frame_size(&func->scope);
 
         // align stack frame to 16 bytes
         if (ctx->frame_size % 16 != 0) {

@@ -1,5 +1,10 @@
-int add_x_ignore_y_add_1(int x, int y) {
+int return_two() {
     int two = 2;
+    return two;
+}
+
+int add_x_ignore_y_add_1(int x, int y) {
+    int two = return_two();
 
     y = 0;
 
@@ -19,20 +24,30 @@ int main() {
     return tewnty * add_x_ignore_y_add_1(3, 1337) - (twelve + twelve + ten) - 2;
 }
 
+int test2() {
+    int _1;
+    int _2;
+    int _3;
+    int _4;
+    int _5;
+    int _6;
+}
+
 int test() {
+    int _1;
+    int _2;
+    int _3;
+
     {
-        int a;
-        a = 4;
-        return a;
+        int _4;
+        int _1;
+        int _2;
+        int _3;
 
         {
-            int a;
-            a = 6;
-            return a + 4;
+            int _5;
         }
     }
 
-    int a;
-    a = 2;
-    return a;
+    int _6;
 }

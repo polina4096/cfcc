@@ -1,8 +1,8 @@
-int five() {
+int add_x_y_and_1(int x, int y) {
     int two;
-    two = 2;
+    two = 1;
 
-    return two + 3;
+    return two + x + y;
 }
 
 int main() {
@@ -15,5 +15,5 @@ int main() {
     int twelve;
     twelve = 12;
 
-    return tewnty * five() - (twelve + twelve + ten) - 2;
+    return tewnty * add_x_y_and_1(3, 1) - (twelve + twelve + ten) - 2;
 }

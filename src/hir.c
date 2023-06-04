@@ -228,11 +228,46 @@ struct Variable* find_var(char* identifier, struct Scope* scope) {
     return NULL;
 }
 
+// list helper functions
+struct Statement* append_stmt(struct Function* func) {
+    func->body_length += 1;
+    func->body = realloc(func->body, sizeof(struct Statement) * func->body_length);
+    return func->body[func->body_length - 1] = malloc(sizeof(struct Statement));
+}
+
+struct Expression* append_arg(struct ExprCall* call_expr) {
+    call_expr->args_length += 1;
+    call_expr->args = realloc(call_expr->args, sizeof(struct Statement) * call_expr->args_length);
+    return call_expr->args[call_expr->args_length - 1] = malloc(sizeof(struct Expression));
+}
+
+struct Function* append_func(struct Scope* scope) {
+    scope->functions_length += 1;
+    scope->functions = realloc(scope->functions, sizeof(struct Function) * scope->functions_length);
+    return scope->functions[scope->functions_length - 1] = malloc(sizeof(struct Function));
+}
+
+struct Variable* append_var(struct Function* func) {
+    func->scope.variables_length += 1;
+    func->scope.variables = realloc(func->scope.variables, sizeof(struct Variable) * func->scope.variables_length);
+    return func->scope.variables[func->scope.variables_length - 1] = malloc(sizeof(struct Variable));
+}
+
+struct Variable* append_param(struct Function* func) {
+    func->params_length += 1;
+    func->scope.variables_length += 1;
+    func->params = realloc(func->params, sizeof(struct Variable) * func->params_length);
+    func->scope.variables = realloc(func->scope.variables, sizeof(struct Variable) * func->scope.variables_length);
+    return func->params[func->params_length - 1] = func->scope.variables[func->scope.variables_length - 1] = malloc(sizeof(struct Variable));
+}
+
 // ast -> hir
 void lower_expression(struct Expression* expr, struct Scope* scope, const char* src, TSNode node) {
     switch (ts_node_symbol(node)) {
         case sym_call_expression: {
             expr->kind = EXPR_CALL;
+            expr->expr_call.args = NULL;
+            expr->expr_call.args_length = 0;
             
             TSNode ident_node = ts_node_named_child(node, 0);
             char* identifier = tsnstr(src, ident_node);
@@ -242,9 +277,13 @@ void lower_expression(struct Expression* expr, struct Scope* scope, const char* 
                 printf("function `%s` not found\n", identifier);
             }
 
-            // TODO: args
-            // TSNode args_node = ts_node_named_child(node, 1);
-            // dbg_node(args_node);
+            TSNode args_node = ts_node_named_child(node, 1);
+            size_t args_count = ts_node_named_child_count(args_node);
+            for (int j = 0; j < args_count; j++) {
+                TSNode arg_node = ts_node_named_child(args_node, j);
+                struct Expression* arg = append_arg(&expr->expr_call);
+                lower_expression(arg, scope, src, arg_node);
+            }
 
             break;
         }
@@ -334,31 +373,6 @@ void lower_expression(struct Expression* expr, struct Scope* scope, const char* 
     }
 }
 
-// list helper functions
-struct Statement* append_stmt(struct Function* func) {
-    func->body_length += 1;
-    func->body = realloc(func->body, sizeof(struct Statement) * func->body_length);
-    return func->body[func->body_length - 1] = malloc(sizeof(struct Statement));
-}
-
-struct Function* append_func(struct Scope* scope) {
-    scope->functions_length += 1;
-    scope->functions = realloc(scope->functions, sizeof(struct Function) * scope->functions_length);
-    return scope->functions[scope->functions_length - 1] = malloc(sizeof(struct Function));
-}
-
-struct Variable* append_var(struct Function* func) {
-    func->scope.variables_length += 1;
-    func->scope.variables = realloc(func->scope.variables, sizeof(struct Variable) * func->scope.variables_length);
-    return func->scope.variables[func->scope.variables_length - 1] = malloc(sizeof(struct Variable));
-}
-
-struct Variable* append_param(struct Function* func) {
-    func->params_length += 1;
-    func->params = realloc(func->params, sizeof(struct Variable) * func->params_length);
-    return func->params[func->params_length - 1] = malloc(sizeof(struct Variable));
-}
-
 void lower_unit(struct Unit* unit, const char* src) {
     unit->scope.functions_length = 0;
     unit->scope.variables_length = 0;
@@ -405,7 +419,7 @@ void lower_unit(struct Unit* unit, const char* src) {
 
                 TSNode func_params_node = ts_node_named_child(func_declarator_node, 1);
                 size_t func_params_count = ts_node_named_child_count(func_params_node);
-                for (int j = 0; i < func_params_count; i++) {
+                for (int j = 0; j < func_params_count; j++) {
                     TSNode param_node = ts_node_named_child(func_params_node, j);
                     TSNode param_type_node = ts_node_named_child(param_node, 0);
                     TSNode param_ident_node = ts_node_named_child(param_node, 1);

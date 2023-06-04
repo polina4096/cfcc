@@ -101,6 +101,7 @@ size_t calc_var_offset(struct Function* func, struct Variable* var) {
     }
 
     printf("failed to find var %s", var->identifier);
+    return -1;
 }
 
 size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Function* func, struct Context* ctx, char** buffer) {    
@@ -154,21 +155,31 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Functi
         }
 
         case EXPR_CALL: {
+            // store scratch registers
             for (int i = 0; i < ctx->allocator.scratch_count; i++) {
                 if (ctx->allocator.scratch_state[i] != 0) {
                     strfmt(buffer, "\tpushq %%%s\n", ctx->allocator.scratch[i]);
                 }
             }
 
-            size_t r = alloc_register(&ctx->allocator);
+            // load args into arg registers
+            for (int i = 0; i < expr->expr_call.args_length; i++) {
+                size_t r = generate_expr(expr->expr_call.args[i], scope, func, ctx, buffer);
+                strfmt(buffer, "\tmovl %%%sd, %%e%s\n", ctx->allocator.scratch[r], ctx->allocator.argument[i]);
+                free_register(&ctx->allocator, r);
+            }
+
+            // call function
             strfmt(buffer, "\tcall %s\n", expr->expr_call.func->identifier);
 
+            // restore scratch registers
             for (int i = 0; i < ctx->allocator.scratch_count; i++) {
-                if (i != r && ctx->allocator.scratch_state[i] != 0) {
+                if (ctx->allocator.scratch_state[i] != 0) {
                     strfmt(buffer, "\tpopq %%%s\n", ctx->allocator.scratch[i]);
                 }
             }
 
+            size_t r = alloc_register(&ctx->allocator);
             struct Type* return_type = expr->expr_call.func->return_type;
             switch (return_type->kind) {
                 case TYPE_KIND_BASIC: {
@@ -251,6 +262,12 @@ char* generate(struct Unit* unit, struct Context* ctx) {
         
         // load current stack position as base
         strapp(&buffer, "\tmovq %rsp, %rbp\n");
+
+        // store function arguments
+        for (int j = 0; j < func->params_length; j++) {
+            size_t offset = calc_var_offset(func, func->params[j]);
+            strfmt(&buffer, "\tmovl %%e%s, -%i(%%rbp)\n", ctx->allocator.argument[j], offset);
+        }
 
         size_t frame_size = 0; // calculate stack frame size
         for (int j = 0; j < func->params_length; j++) frame_size += type_size(func->params[j]->type);

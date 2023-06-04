@@ -6,6 +6,7 @@
         * return
         * expression
         * if
+        * else
     - expressions
         * literal
         * function call (up to 4 arguments)

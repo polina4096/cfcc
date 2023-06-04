@@ -120,6 +120,7 @@ struct StmtCompound {
 struct StmtIf {
     struct Expression condition_expr;
     struct Scope success_scope;
+    struct Scope failure_scope;
 };
 
 struct StmtReturn {
@@ -133,6 +134,7 @@ struct StmtExpression {
 enum StatementKind {
     STMT_COMPOUND,
     STMT_IF,
+    STMT_IF_ELSE,
     STMT_RETURN,
     STMT_EXPRESSION,
 };
@@ -270,6 +272,28 @@ struct Variable* find_var(char* identifier, struct Scope* scope) {
     return NULL;
 }
 
+// init helper functions
+void init_scope(struct Scope* scope, struct Scope* outer) {
+    scope->outer = outer;
+
+    scope->functions_length = 0;
+    scope->variables_length = 0;
+    scope->statements_length = 0;
+
+    scope->functions = NULL;
+    scope->variables = NULL;
+    scope->statements = NULL;
+
+    scope->variables = NULL;
+    scope->variables_length = 0;
+}
+
+void init_func(struct Function* func, struct Scope* outer) {
+    func->params = NULL;
+    func->params_length = 0;
+    init_scope(&func->scope, outer);
+}
+
 // list helper functions
 struct Statement* append_stmt(struct Scope* scope) {
     scope->statements_length += 1;
@@ -286,7 +310,9 @@ struct Expression* append_arg(struct ExprCall* call_expr) {
 struct Function* append_func(struct Scope* scope) {
     scope->functions_length += 1;
     scope->functions = realloc(scope->functions, sizeof(struct Function) * scope->functions_length);
-    return scope->functions[scope->functions_length - 1] = malloc(sizeof(struct Function));
+    struct Function* func = malloc(sizeof(struct Function));
+    init_func(func, scope);
+    return scope->functions[scope->functions_length - 1] = func;
 }
 
 struct Variable* append_var(struct Scope* scope) {
@@ -448,18 +474,9 @@ void lower_statement(struct Scope* scope, const char* src, TSNode node) {
             stmt->kind = STMT_IF;
             
             struct Scope* success_scope = &stmt->stmt_if.success_scope;
-
-            success_scope->outer = scope;
-            success_scope->functions_length = 0;
-            success_scope->variables_length = 0;
-            success_scope->statements_length = 0;
-
-            success_scope->functions = NULL;
-            success_scope->variables = NULL;
-            success_scope->statements = NULL;
-            
-            success_scope->variables = NULL;
-            success_scope->variables_length = 0;
+            struct Scope* failure_scope = &stmt->stmt_if.failure_scope;
+            init_scope(success_scope, scope);
+            init_scope(failure_scope, scope);
 
             TSNode condition_expr_node = ts_node_named_child(node, 0);
             struct Expression* condition_expr = &stmt->stmt_if.condition_expr;
@@ -467,6 +484,12 @@ void lower_statement(struct Scope* scope, const char* src, TSNode node) {
 
             TSNode success_compound_node = ts_node_named_child(node, 1);
             lower_statement(success_scope, src, success_compound_node);
+
+            if (ts_node_named_child_count(node) > 2) { // else branch
+                stmt->kind = STMT_IF_ELSE;
+                TSNode failure_compound_node = ts_node_named_child(node, 2);
+                lower_statement(failure_scope, src, failure_compound_node);
+            }
             break;
         }
 
@@ -530,8 +553,7 @@ void lower_statement(struct Scope* scope, const char* src, TSNode node) {
 }
 
 void lower_unit(struct Unit* unit, const char* src) {
-    unit->scope.functions_length = 0;
-    unit->scope.variables_length = 0;
+    init_scope(&unit->scope, NULL);
 
     TSParser* parser = ts_parser_new();
     ts_parser_set_language(parser, tree_sitter_c());
@@ -555,21 +577,6 @@ void lower_unit(struct Unit* unit, const char* src) {
                 TSNode func_cmpd_stmt_node = ts_node_named_child(node, 2);
                 
                 struct Function* func = append_func(&unit->scope);
-                func->scope.outer = &unit->scope;
-                func->scope.functions_length = 0;
-                func->scope.variables_length = 0;
-                func->scope.statements_length = 0;
-
-                func->scope.functions = NULL;
-                func->scope.variables = NULL;
-                func->scope.statements = NULL;
-                
-                func->scope.variables = NULL;
-                func->scope.variables_length = 0;
-
-                func->params = NULL;
-                func->params_length = 0;
-
                 struct Type* type = malloc(sizeof(struct Type));
                 lower_type(src, func_return_type_node, type);
                 func->return_type = type;

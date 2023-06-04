@@ -1,14 +1,10 @@
 int main() {
-    int a = 200;
+    int a = 4;
     if (a > 5) {
-        int a;
-        int b;
-        int c;
-        int d;
-        int e;
-        
         return a;
+    } else {
+        a = 8;
     }
 
-    return 222;
+    return a;
 }

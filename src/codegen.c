@@ -330,8 +330,16 @@ size_t calc_scope_frame_size(struct Scope* scope) {
     size_t frame_size = 0;
     for (int j = 0; j < scope->variables_length; j++) frame_size += type_size(scope->variables[j]->type);
     for (int j = 0; j < scope->statements_length; j++) {
-        if (scope->statements[j]->kind == STMT_COMPOUND) {
-            frame_size += calc_scope_frame_size(&scope->statements[j]->stmt_compound.scope);
+        switch (scope->statements[j]->kind) {
+            case STMT_COMPOUND:
+                frame_size += calc_scope_frame_size(&scope->statements[j]->stmt_compound.scope);
+                break;
+
+            case STMT_IF:
+                frame_size += calc_scope_frame_size(&scope->statements[j]->stmt_if.success_scope);
+                break;
+
+            default: break;
         }
     }
 

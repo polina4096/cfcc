@@ -1,6 +1,5 @@
 int add_x_ignore_y_add_1(int x, int y) {
-    int two;
-    two = 2;
+    int two = 2;
 
     y = 0;
 

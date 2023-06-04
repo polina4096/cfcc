@@ -318,9 +318,9 @@ void lower_expression(struct Expression* expr, struct Scope* scope, const char* 
                 printf("variable `%s` not found\n", identifier);
             }
 
-            TSNode value_node = ts_node_named_child(node, 1);
+            TSNode expr_node = ts_node_named_child(node, 1);
             expr->expr_assignment.expression = malloc(sizeof(struct Expression));
-            lower_expression(expr->expr_assignment.expression, scope, src, value_node);
+            lower_expression(expr->expr_assignment.expression, scope, src, expr_node);
             
             break;
         }
@@ -421,13 +421,34 @@ void lower_statement(struct Scope* scope, const char* src, TSNode node) {
 
         case sym_declaration: {
             TSNode decl_type_node = ts_node_named_child(node, 0);
-            TSNode decl_ident_node = ts_node_named_child(node, 1);
+            TSNode decl_decl_node = ts_node_named_child(node, 1);
             struct Type* type = malloc(sizeof(struct Type));
             lower_type(src, decl_type_node, type);
             
             struct Variable* local = append_var(scope);
-            local->identifier = tsnstr(src, decl_ident_node);
             local->type = type;
+
+            int decl_decl_node_sym = ts_node_symbol(decl_decl_node);
+            if (decl_decl_node_sym == sym_identifier) {
+                local->identifier = tsnstr(src, decl_decl_node);
+            } else if (decl_decl_node_sym == sym_init_declarator) {
+                // ident = expr
+                TSNode ident_node = ts_node_named_child(decl_decl_node, 0);
+                TSNode expr_node = ts_node_named_child(decl_decl_node, 1);
+
+                local->identifier = tsnstr(src, ident_node);
+                
+                struct Statement* stmt = append_stmt(scope);
+                stmt->kind = STMT_EXPRESSION;
+
+                struct Expression* expr = &stmt->stmt_expression.expr;
+                expr->kind = EXPR_ASSIGNMENT;
+                expr->expr_assignment.variable = local;
+                expr->expr_assignment.expression = malloc(sizeof(struct Expression));
+                lower_expression(expr->expr_assignment.expression, scope, src, expr_node);
+                
+            }
+
             break;
         }
 

@@ -8,6 +8,7 @@
     - expressions
         * literal
         * function call (up to 4 arguments)
+        * variable declaration initializers
         * variable access
         * variable assignment
         * math operations

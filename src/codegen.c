@@ -300,6 +300,8 @@ void generate_statement(struct Statement* stmt, struct Scope* scope, struct Func
         case STMT_IF_ELSE: {
             size_t r = generate_expr(&stmt->stmt_if.condition_expr, scope, func, ctx, buffer);
             strfmt(buffer, "\tcmpl $1, %%%sd\n", ctx->allocator.scratch[r]);
+            free_register(&ctx->allocator, r);
+            
             strfmt(buffer, "\tjne .L%zu\n", ctx->free_label);
             generate_scope(&stmt->stmt_if.success_scope, func, ctx, buffer);
             strfmt(buffer, ".L%zu:\n", ctx->free_label);

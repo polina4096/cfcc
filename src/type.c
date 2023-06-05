@@ -51,7 +51,10 @@ static size_t type_size_basic(enum FundamentalType fundamental) {
 
         case TYPE_F32:
             return 4;
-    }
+            
+        case TYPE_VOID:
+            return -1;
+        }
 }
 
 static size_t type_size_compound(struct Compound* compound) {

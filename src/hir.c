@@ -448,17 +448,7 @@ void lower_statement(struct Scope* scope, const char* src, TSNode node) {
             stmt->kind = STMT_COMPOUND;
 
             struct Scope* compound_scope = &stmt->stmt_compound.scope;
-            compound_scope->outer = scope;
-            compound_scope->functions_length = 0;
-            compound_scope->variables_length = 0;
-            compound_scope->statements_length = 0;
-
-            compound_scope->functions = NULL;
-            compound_scope->variables = NULL;
-            compound_scope->statements = NULL;
-            
-            compound_scope->variables = NULL;
-            compound_scope->variables_length = 0;
+            init_scope(compound_scope, scope);
 
             size_t cmpd_stmt_node_children_length = ts_node_named_child_count(node);
             for (int i = 0; i < cmpd_stmt_node_children_length; i++) {

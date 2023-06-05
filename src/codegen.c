@@ -303,12 +303,12 @@ void generate_statement(struct Statement* stmt, struct Scope* scope, struct Func
             strfmt(buffer, "\tjne .L%zu\n", ctx->free_label);
             generate_scope(&stmt->stmt_if.success_scope, func, ctx, buffer);
             strfmt(buffer, ".L%zu:\n", ctx->free_label);
+            ctx->free_label += 1;
             
             if (stmt->kind == STMT_IF_ELSE) {
                 generate_scope(&stmt->stmt_if.failure_scope, func, ctx, buffer);
             }
 
-            ctx->free_label += 1;
             break;
         }
 

@@ -1,5 +1,6 @@
 ## Implemented features
 ### code generation
+- function declarations
 - function definitions
     - statements
         * compound (nested blocks)

@@ -39,6 +39,7 @@ struct Function {
     struct Type* return_type;
 
     struct Scope scope;
+    bool prototype;
 };
 
 // Compilation Unit
@@ -306,6 +307,9 @@ void init_scope(struct Scope* scope, struct Scope* outer) {
 void init_func(struct Function* func, struct Scope* outer) {
     func->params = NULL;
     func->params_length = 0;
+
+    func->prototype = false;
+
     init_scope(&func->scope, outer);
 }
 
@@ -551,7 +555,6 @@ void lower_statement(struct Scope* scope, const char* src, TSNode node) {
                 expr->expr_assignment.variable = local;
                 expr->expr_assignment.expression = malloc(sizeof(struct Expression));
                 lower_expression(expr->expr_assignment.expression, scope, src, expr_node);
-                
             }
 
             break;
@@ -592,6 +595,36 @@ void lower_unit(struct Unit* unit, const char* src) {
         TSNode node = ts_node_named_child(root_node, i);
 
         switch (ts_node_symbol(node)) {
+            case sym_declaration: {
+                TSNode func_return_type_node = ts_node_named_child(node, 0);
+                TSNode func_declarator_node = ts_node_named_child(node, 1);
+
+                struct Function* func = append_func(&unit->scope);
+                struct Type* type = malloc(sizeof(struct Type));
+                lower_type(src, func_return_type_node, type);
+                func->return_type = type;
+
+                TSNode func_identifier_node = ts_node_named_child(func_declarator_node, 0);
+                func->identifier = tsnstr(src, func_identifier_node);
+
+                TSNode func_params_node = ts_node_named_child(func_declarator_node, 1);
+                size_t func_params_count = ts_node_named_child_count(func_params_node);
+                for (int j = 0; j < func_params_count; j++) {
+                    TSNode param_node = ts_node_named_child(func_params_node, j);
+                    TSNode param_type_node = ts_node_named_child(param_node, 0);
+                    TSNode param_ident_node = ts_node_named_child(param_node, 1);
+                    struct Type* type = malloc(sizeof(struct Type));
+                    lower_type(src, param_type_node, type);
+
+                    struct Variable* param = append_param(func);
+                    param->identifier = tsnstr(src, param_ident_node);
+                    param->type = type;
+                }
+
+                func->prototype = true;
+                break;
+            }
+
             case sym_function_definition: {
                 TSNode func_return_type_node = ts_node_named_child(node, 0);
                 TSNode func_declarator_node = ts_node_named_child(node, 1);

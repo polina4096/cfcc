@@ -371,13 +371,32 @@ char* generate(struct Unit* unit, struct Context* ctx) {
         "\t.text\n"
         "\t.globl main\n"
         "\t.type  main, @function\n"
+        "\n"
+        ".LC0:\n"
+        "\t.string\t\"%d\\n\"\n"
+        "\n"
+        "printint:\n"
+        "\tpushq\t%rbp\n"
+        "\tmovq\t%rsp, %rbp\n"
+        "\tsubq\t$16, %rsp\n"
+        "\tmovl\t%edi, -4(%rbp)\n"
+        "\tmovl\t-4(%rbp), %eax\n"
+        "\tmovl\t%eax, %esi\n"
+        "\tleaq	.LC0(%rip), %rdi\n"
+        "\tmovl	$0, %eax\n"
+        "\tcall	printf@PLT\n"
+        "\tnop\n"
+        "\tleave\n"
+        "\tret\n"
     );
 
     ctx->free_label = 0;
 
     for (int i = 0; i < unit->scope.functions_length; i++) {
-        free_all_registers(&ctx->allocator);
         struct Function* func = unit->scope.functions[i];
+        if (func->prototype) continue;
+
+        free_all_registers(&ctx->allocator);
         strfmt(&buffer, "\n%s:\n", func->identifier);
 
         // save prevoius base pointer

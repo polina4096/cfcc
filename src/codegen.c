@@ -86,10 +86,15 @@ void free_all_registers(struct RegisterAllocator* registers) {
     }
 }
 
-size_t calc_var_offset(struct Scope* scope, struct Variable* var, bool* found) {
+size_t calc_var_offset(struct Scope* scope, struct Variable* var, size_t idx, bool* found) {
     size_t offset = 0;
     for (int i = 0; i < scope->variables_length; i++) {
-        offset += type_size(scope->variables[i]->type);
+        if (scope->variables[i]->type->kind != TYPE_KIND_ARRAY) {
+            offset += type_size(scope->variables[i]->type);
+        } else {
+            offset += type_size(scope->variables[i]->type->array.type) * (idx + 1);
+        }
+
         if (var == scope->variables[i]) {
             if (found != NULL) {
                 *found = true;
@@ -101,7 +106,7 @@ size_t calc_var_offset(struct Scope* scope, struct Variable* var, bool* found) {
 
     for (int i = 0; i < scope->statements_length; i++) {
         if (scope->statements[i]->kind == STMT_COMPOUND) {
-            size_t scope_offset = calc_var_offset(&scope->statements[i]->stmt_compound.scope, var, found);
+            size_t scope_offset = calc_var_offset(&scope->statements[i]->stmt_compound.scope, var, idx, found);
             offset += scope_offset;
         }
     }
@@ -119,14 +124,28 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Functi
     switch (expr->kind) {
         case EXPR_VARIABLE: {
             size_t r = alloc_register(&ctx->allocator);
-            size_t offset = calc_var_offset(&func->scope, expr->expr_variable.variable, NULL);
+            size_t offset = calc_var_offset(&func->scope, expr->expr_variable.variable, -1, NULL);
+            strfmt(buffer, "\tmovl -%i(%%rbp), %%%sd\n", offset, ctx->allocator.scratch[r]);
+            return r;
+        }
+
+        case EXPR_VARIABLE_INDEX: {
+            size_t r = alloc_register(&ctx->allocator);
+            size_t offset = calc_var_offset(&func->scope, expr->expr_variable_index.variable, expr->expr_variable_index.index, NULL);
             strfmt(buffer, "\tmovl -%i(%%rbp), %%%sd\n", offset, ctx->allocator.scratch[r]);
             return r;
         }
 
         case EXPR_ASSIGNMENT: {
             size_t r = generate_expr(expr->expr_assignment.expression, scope, func, ctx, buffer);
-            size_t offset = calc_var_offset(&func->scope, expr->expr_assignment.variable, NULL);
+            size_t offset = calc_var_offset(&func->scope, expr->expr_assignment.variable, -1, NULL);
+            strfmt(buffer, "\tmovl %%%sd, -%i(%%rbp)\n", ctx->allocator.scratch[r], offset);
+            return r;
+        }
+
+        case EXPR_ASSIGNMENT_INDEX: {
+            size_t r = generate_expr(expr->expr_assignment_index.expression, scope, func, ctx, buffer);
+            size_t offset = calc_var_offset(&func->scope, expr->expr_assignment_index.variable, expr->expr_assignment_index.index, NULL);
             strfmt(buffer, "\tmovl %%%sd, -%i(%%rbp)\n", ctx->allocator.scratch[r], offset);
             return r;
         }
@@ -419,7 +438,7 @@ char* generate(struct Unit* unit, struct Context* ctx) {
 
         // store function arguments
         for (int j = 0; j < func->params_length; j++) {
-            size_t offset = calc_var_offset(&func->scope, func->params[j], NULL);
+            size_t offset = calc_var_offset(&func->scope, func->params[j], -1, NULL);
             strfmt(&buffer, "\tmovl %%e%s, -%i(%%rbp)\n", ctx->allocator.argument[j], offset);
         }
 

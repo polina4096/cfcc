@@ -15,6 +15,7 @@
         * variable declaration initializer
         * variable access
         * variable assignment
+        * subscript operator
         * math operations
             * addition
             * subtraction
@@ -24,6 +25,7 @@
             * relational
             * equality
 - types
+    * arrays
     * fundamental types
         * i32
         * ~~f32~~

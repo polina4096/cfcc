@@ -113,7 +113,18 @@ struct Expression {
 };
 
 // Statements
+struct Statement;
+
 struct StmtCompound {
+    struct Scope scope;
+};
+
+struct StmtGoto {
+    const char* label;
+};
+
+struct StmtLabel {
+    const char* label;
     struct Scope scope;
 };
 
@@ -133,6 +144,8 @@ struct StmtExpression {
 
 enum StatementKind {
     STMT_COMPOUND,
+    STMT_GOTO,
+    STMT_LABEL,
     STMT_IF,
     STMT_IF_ELSE,
     STMT_RETURN,
@@ -143,6 +156,8 @@ struct Statement {
     enum StatementKind kind;
     union {
         struct StmtCompound stmt_compound;
+        struct StmtGoto stmt_goto;
+        struct StmtLabel stmt_label;
         struct StmtIf stmt_if;
         struct StmtReturn stmt_return;
         struct StmtExpression stmt_expression;
@@ -456,6 +471,22 @@ void lower_statement(struct Scope* scope, const char* src, TSNode node) {
                 lower_statement(compound_scope, src, stmt_node);
             }
 
+            break;
+        }
+
+        case sym_labeled_statement: {
+            struct Statement* stmt = append_stmt(scope);
+            stmt->kind = STMT_LABEL;
+            stmt->stmt_label.label = tsnstr(src, ts_node_named_child(node, 0));
+            init_scope(&stmt->stmt_label.scope, scope);
+            lower_statement(&stmt->stmt_label.scope, src, ts_node_named_child(node, 1));
+            break;
+        }
+
+        case sym_goto_statement: {
+            struct Statement* stmt = append_stmt(scope);
+            stmt->kind = STMT_GOTO;
+            stmt->stmt_goto.label = tsnstr(src, ts_node_named_child(node, 0));
             break;
         }
 

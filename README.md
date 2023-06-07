@@ -4,6 +4,7 @@
     - statements
         * compound (nested blocks)
         * return
+        * goto & labels
         * expression
         * if
         * else

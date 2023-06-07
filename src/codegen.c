@@ -295,6 +295,17 @@ void generate_statement(struct Statement* stmt, struct Scope* scope, struct Func
             generate_scope(compound_scope, func, ctx, buffer);
             break;
         }
+
+        case STMT_GOTO: {
+            strfmt(buffer, "\tjmp %s\n", stmt->stmt_goto.label);
+            break;
+        }
+
+        case STMT_LABEL: {
+            strfmt(buffer, "%s:\n", stmt->stmt_label.label);
+            generate_scope(&stmt->stmt_label.scope, func, ctx, buffer);
+            break;
+        }
         
         case STMT_IF:
         case STMT_IF_ELSE: {

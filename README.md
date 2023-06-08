@@ -21,9 +21,10 @@
             * subtraction
             * multiplication
             * ~~division~~
-        * logical operations
+        * other operations
             * relational
             * equality
+            * logical
 - types
     * arrays
     * fundamental types

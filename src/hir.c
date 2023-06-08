@@ -54,7 +54,7 @@ struct ExprVariable {
 
 struct ExprVariableIndex {
     struct Variable* variable;
-    size_t index;
+    struct Expression* index_expression;
 };
 
 struct ExprAssignment {
@@ -65,7 +65,7 @@ struct ExprAssignment {
 struct ExprAssignmentIndex {
     struct Variable* variable;
     struct Expression* expression;
-    size_t index;
+    struct Expression* index_expression;
 };
 
 struct ExprLiteral {
@@ -96,6 +96,10 @@ enum BinaryOperation {
     // equality
     BINARY_OP_EQ,
     BINARY_OP_NE,
+
+    // logical
+    BINARY_OP_AND,
+    BINARY_OP_OR,
 };
 
 struct ExprBinaryOp {
@@ -270,6 +274,12 @@ enum BinaryOperation parse_binary_op(char* str) {
     else if (strcmp(str, "!=") == 0)
         return BINARY_OP_NE;
 
+    else if (strcmp(str, "&&") == 0)
+        return BINARY_OP_AND;
+
+    else if (strcmp(str, "||") == 0)
+        return BINARY_OP_OR;
+
     else
         return -1;
 }
@@ -407,13 +417,12 @@ void lower_expression(struct Expression* expr, struct Scope* scope, const char* 
             expr->kind = EXPR_VARIABLE_INDEX;
 
             TSNode ident_node = ts_node_named_child(node, 0);
-            TSNode index_node = ts_node_named_child(node, 1);
-            char* index_str = tsnstr(src, index_node);
+            TSNode index_expr_node = ts_node_named_child(node, 1);
             char* identifier = tsnstr(src, ident_node);
 
             expr->expr_variable_index.variable = find_var(identifier, scope);
-            expr->expr_variable_index.index = strtol(index_str, NULL, 10);
-            free(index_str);
+            expr->expr_variable_index.index_expression = malloc(sizeof(struct Expression));
+            lower_expression(expr->expr_variable_index.index_expression, scope, src, index_expr_node);
 
             if (expr->expr_variable_index.variable == NULL) {
                 printf("variable `%s` not found\n", identifier);
@@ -443,12 +452,12 @@ void lower_expression(struct Expression* expr, struct Scope* scope, const char* 
                 case sym_subscript_expression: {
                     expr->kind = EXPR_ASSIGNMENT_INDEX;
                     TSNode ident_node = ts_node_named_child(var_node, 0);
-                    TSNode index_node = ts_node_named_child(var_node, 1);
-                    char* index_str = tsnstr(src, index_node);
+                    TSNode index_expr_node = ts_node_named_child(var_node, 1);
                     char* identifier = tsnstr(src, ident_node);
+
                     expr->expr_assignment_index.variable = find_var(identifier, scope);
-                    expr->expr_assignment_index.index = strtol(index_str, NULL, 10);
-                    free(index_str);
+                    expr->expr_assignment_index.index_expression = malloc(sizeof(struct Expression));
+                    lower_expression(expr->expr_assignment_index.index_expression, scope, src, index_expr_node);
 
                     if (expr->expr_assignment.variable == NULL) {
                         printf("variable `%s` not found\n", identifier);
@@ -637,7 +646,13 @@ void lower_statement(struct Scope* scope, const char* src, TSNode node) {
                     local->type = malloc(sizeof(struct Type));
                     local->type->kind = TYPE_KIND_ARRAY;
                     local->type->array.type = type;
-                    local->type->array.length = strtol(length_str, NULL, 10);
+
+                    size_t length = strtol(length_str, NULL, 10);
+                    if (length == 0) {
+                        printf("failed to parse array length, must be const\n");
+                    }
+
+                    local->type->array.length = length;
                     free(length_str);
 
                     break;

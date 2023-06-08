@@ -1,15 +1,9 @@
-int printint(int _1);
+int printn_int(int _1);
+int print_char(int _1);
+int print_newline();
 
 int main() {
-    int a[4];
-    a[0] = 1;
-    a[1] = 2;
-    a[2] = 3;
-    a[3] = 4;
+    printn_int(1 > 5 && 2 == 2 && 7 > 4);
 
-    printint(a[0]);
-    printint(a[1]);
-    printint(a[2]);
-    printint(a[3]);
     return 0;
 }

@@ -8,9 +8,10 @@ enum TypeKind {
     TYPE_KIND_BASIC,
     TYPE_KIND_COMPOUND,
     TYPE_KIND_ARRAY,
+    TYPE_KIND_POINTER,
 };
 
-enum FundamentalType {
+enum Fundamental {
     TYPE_VOID,
     TYPE_I32,
     TYPE_F32,
@@ -33,18 +34,23 @@ struct Array {
     size_t length;
 };
 
+struct Pointer {
+    struct Type* type;
+};
+
 struct Type {
     enum TypeKind kind;
     union {
-        enum FundamentalType basic;
+        enum Fundamental basic;
         struct Compound compound;
         struct Array array;
+        struct Pointer pointer;
     };
 };
 
 size_t type_size(struct Type* type);
 
-static size_t type_size_basic(enum FundamentalType fundamental) {
+static size_t type_size_basic(enum Fundamental fundamental) {
     switch (fundamental) {
         case TYPE_I32:
             return 4;
@@ -80,10 +86,27 @@ size_t type_size(struct Type* type) {
 
         case TYPE_KIND_ARRAY:
             return type_size_array(&type->array);
+
+        case TYPE_KIND_POINTER:
+            return 8; // TODO: support other architectures
     }
 }
 
 #include "../deps/tree-sitter/lib/include/tree_sitter/api.h"
+
+
+char* tsnst1r(const char* src, TSNode node) {
+    size_t start = ts_node_start_byte(node);
+    size_t end = ts_node_end_byte(node);
+    size_t length = end - start;
+
+    char* buffer = malloc(length + 1);
+    memcpy(buffer, &src[start], length);
+    buffer[length] = '\0';
+
+    return buffer;
+}
+
 
 void lower_type(const char* buffer, TSNode node, struct Type* type) {
     size_t start = ts_node_start_byte(node);

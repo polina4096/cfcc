@@ -137,10 +137,22 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Functi
             return r;
         }
 
+        case EXPR_VARIABLE_POINTER: {
+            size_t r = alloc_register(&ctx->allocator);
+            size_t offset = calc_var_offset(&func->scope, expr->expr_variable_pointer.variable, NULL);
+            strfmt(buffer, "\tleaq -%i(%%rbp), %%%s\n", offset, ctx->allocator.scratch[r]);
+            return r;
+        }
+
         case EXPR_ASSIGNMENT: {
             size_t r = generate_expr(expr->expr_assignment.expression, scope, func, ctx, buffer);
             size_t offset = calc_var_offset(&func->scope, expr->expr_assignment.variable, NULL);
-            strfmt(buffer, "\tmovl %%%sd, -%i(%%rbp)\n", ctx->allocator.scratch[r], offset);
+            // TODO: implement proper type support
+            if (expr->expr_assignment.expression->kind == EXPR_VARIABLE_POINTER) {
+                strfmt(buffer, "\tmovq %%%s, -%i(%%rbp)\n", ctx->allocator.scratch[r], offset);
+            } else {
+                strfmt(buffer, "\tmovl %%%sd, -%i(%%rbp)\n", ctx->allocator.scratch[r], offset);
+            }
             return r;
         }
 
@@ -153,6 +165,17 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Functi
 
             strapp(buffer, "\tcltq\n");
             strfmt(buffer, "\tmovl %%%sd, -%i(%%rbp,%%rax,4)\n", ctx->allocator.scratch[r], stack_offset);
+            return r;
+        }
+
+        case EXPR_ASSIGNMENT_POINTER: {
+            size_t r = generate_expr(expr->expr_assignment_pointer.expression, scope, func, ctx, buffer);
+            size_t r_memory_address = generate_expr(expr->expr_assignment_pointer.expression, scope, func, ctx, buffer);
+            size_t offset = calc_var_offset(&func->scope, expr->expr_assignment_pointer.variable, NULL);
+            strfmt(buffer, "\tmovq -%i(%%rbp), %%%s\n", offset, ctx->allocator.scratch[r_memory_address]);
+            strfmt(buffer, "\tmovl %%%sd, (%%%s)\n", ctx->allocator.scratch[r], ctx->allocator.scratch[r_memory_address]);
+            free_register(&ctx->allocator, r_memory_address);
+
             return r;
         }
 

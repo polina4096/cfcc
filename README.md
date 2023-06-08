@@ -16,17 +16,21 @@
         * variable access
         * variable assignment
         * subscript operator
-        * math operations
+        * math operators
             * addition
             * subtraction
             * multiplication
             * ~~division~~
-        * other operations
+        * boolean operators
             * relational
             * equality
             * logical
+        * member access operators
+            * address-of operator (only on locals, no arrays yet)
+            * pointer dereference operator
 - types
     * arrays
+    * pointers
     * fundamental types
         * i32
         * ~~f32~~

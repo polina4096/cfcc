@@ -389,21 +389,31 @@ void generate_statement(struct Statement* stmt, struct Scope* scope, struct Func
             size_t r = generate_expr(&stmt->stmt_if.condition_expr, scope, func, ctx, buffer);
             strfmt(buffer, "\tcmpl $1, %%%sd\n", ctx->allocator.scratch[r]);
             free_register(&ctx->allocator, r);
-            
-            strfmt(buffer, "\tjne .L%zu\n", ctx->free_label);
-            generate_scope(&stmt->stmt_if.success_scope, func, ctx, buffer);
-            
+
             if (stmt->kind == STMT_IF_ELSE) {
-                strfmt(buffer, "\tjmp .L%zu\n", ctx->free_label + 1);
-                strfmt(buffer, ".L%zu:\n", ctx->free_label);
+                size_t label_else = ctx->free_label;
                 ctx->free_label += 1;
 
+                size_t label_end = ctx->free_label;
+                ctx->free_label += 1;
+
+                strfmt(buffer, "\tjne .L%zu\n", label_else);
+
+                generate_scope(&stmt->stmt_if.success_scope, func, ctx, buffer);
+                strfmt(buffer, "\tjmp .L%zu\n", label_end);
+
+                strfmt(buffer, ".L%zu:\n", label_else);
                 generate_scope(&stmt->stmt_if.failure_scope, func, ctx, buffer);
-                strfmt(buffer, ".L%zu:\n", ctx->free_label);
-                ctx->free_label += 1;
+
+                strfmt(buffer, ".L%zu:\n", label_end);
             } else {
-                strfmt(buffer, ".L%zu:\n", ctx->free_label);
+                size_t label_end = ctx->free_label;
                 ctx->free_label += 1;
+
+                strfmt(buffer, "\tjne .L%zu\n", label_end);
+                generate_scope(&stmt->stmt_if.success_scope, func, ctx, buffer);
+
+                strfmt(buffer, ".L%zu:\n", label_end);
             }
 
             break;

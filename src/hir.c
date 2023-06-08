@@ -580,9 +580,10 @@ void lower_statement(struct Scope* scope, const char* src, TSNode node) {
             lower_statement(success_scope, src, success_compound_node);
 
             // else branch
-            if (ts_node_named_child_count(node) > 2) {
+            size_t node_children_count = ts_node_named_child_count(node);
+            if (node_children_count > 2) {
                 stmt->kind = STMT_IF_ELSE;
-                TSNode failure_compound_node = ts_node_named_child(node, 2);
+                TSNode failure_compound_node = ts_node_named_child(node, node_children_count - 1);
                 lower_statement(failure_scope, src, failure_compound_node);
             }
             break;
@@ -669,6 +670,10 @@ void lower_statement(struct Scope* scope, const char* src, TSNode node) {
             struct Expression* expr = &stmt->stmt_expression.expr;
             TSNode expr_node = ts_node_named_child(node, 0);
             lower_expression(expr, scope, src, expr_node);
+            break;
+        }
+
+        case sym_comment: {
             break;
         }
 

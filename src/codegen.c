@@ -147,12 +147,41 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Functi
         case EXPR_ASSIGNMENT: {
             size_t r = generate_expr(expr->expr_assignment.expression, scope, func, ctx, buffer);
             size_t offset = calc_var_offset(&func->scope, expr->expr_assignment.variable, NULL);
+
             // TODO: implement proper type support
-            if (expr->expr_assignment.expression->kind == EXPR_VARIABLE_POINTER) {
-                strfmt(buffer, "\tmovq %%%s, -%i(%%rbp)\n", ctx->allocator.scratch[r], offset);
-            } else {
-                strfmt(buffer, "\tmovl %%%sd, -%i(%%rbp)\n", ctx->allocator.scratch[r], offset);
+            struct Type* type = expr->expr_assignment.variable->type;
+            switch (type->kind) {
+                case TYPE_KIND_POINTER:
+                case TYPE_KIND_BASIC: {
+                    switch (type_size(type)) {
+                        case 4: {
+                            strfmt(buffer, "\tmovl %%%sd, -%i(%%rbp)\n", ctx->allocator.scratch[r], offset);
+                            break;
+                        }
+
+                        case 8: {
+                            strfmt(buffer, "\tmovq %%%s, -%i(%%rbp)\n", ctx->allocator.scratch[r], offset);
+                            break;
+                        }
+
+                        default: {
+                            printf("assignment to varible of size %i bytes can't be done\n");
+                            break;
+                        }
+                    }
+                    break;
+                }
+                
+                case TYPE_KIND_ARRAY: {
+                    break;
+                }
+
+                case TYPE_KIND_COMPOUND: {
+                    printf("compound assignment expressions are not yet supported\n");
+                    break;
+                }
             }
+            
             return r;
         }
 
@@ -191,6 +220,12 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Functi
                         case TYPE_I32: {
                             size_t r = alloc_register(&ctx->allocator);
                             strfmt(buffer, "\tmovl $%s, %%%sd\n", expr->expr_literal.value, ctx->allocator.scratch[r]);
+                            return r;
+                        }
+
+                        case TYPE_I64: {
+                            size_t r = alloc_register(&ctx->allocator);
+                            strfmt(buffer, "\tmovq $%s, %%%s\n", expr->expr_literal.value, ctx->allocator.scratch[r]);
                             return r;
                         }
 

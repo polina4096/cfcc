@@ -612,7 +612,14 @@ void lower_expression(struct Expression* expr, struct Scope* scope, const char* 
                 // int
                 expr->expr_literal.type = malloc(sizeof(struct Type));
                 expr->expr_literal.type->kind = TYPE_KIND_BASIC;
-                expr->expr_literal.type->basic = TYPE_I32;
+
+                long value = strtol(str, NULL, 10);
+                if (value > INT32_MAX) {
+                    expr->expr_literal.type->basic = TYPE_I64;
+                } else {
+                    expr->expr_literal.type->basic = TYPE_I32;
+                }
+
             }
 
             break;

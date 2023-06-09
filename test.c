@@ -1,9 +1,10 @@
 int printn_int(int _1);
 
 int main() {
-    int _1;
-    int* a;
-    a = &_1;
-    *a = 2;
-    printn_int(_1);
+    long _1;
+    int _2;
+    _1 = 102147483647;
+    _2 = 1337;
+    
+    return 0;
 }

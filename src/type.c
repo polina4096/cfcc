@@ -14,6 +14,7 @@ enum TypeKind {
 enum Fundamental {
     TYPE_VOID,
     TYPE_I32,
+    TYPE_I64,
     TYPE_F32,
 };
 
@@ -54,6 +55,9 @@ static size_t type_size_basic(enum Fundamental fundamental) {
     switch (fundamental) {
         case TYPE_I32:
             return 4;
+
+        case TYPE_I64:
+            return 8;
 
         case TYPE_F32:
             return 4;
@@ -116,6 +120,9 @@ void lower_type(const char* buffer, TSNode node, struct Type* type) {
     if (strncmp(&buffer[start], "int", length) == 0) {
         type->kind  = TYPE_KIND_BASIC;
         type->basic = TYPE_I32;
+    } else if (strncmp(&buffer[start], "long", length) == 0) {
+        type->kind  = TYPE_KIND_BASIC;
+        type->basic = TYPE_I64;
     } else if (strncmp(&buffer[start], "float", length) == 0) {
         type->kind  = TYPE_KIND_BASIC;
         type->basic = TYPE_F32;

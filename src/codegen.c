@@ -259,6 +259,7 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Functi
             // load args into arg registers
             for (int i = 0; i < expr->expr_call.args_length; i++) {
                 size_t r = generate_expr(expr->expr_call.args[i], scope, func, ctx, buffer);
+                
                 strfmt(buffer, "\tmovl %%%sd, %%e%s\n", ctx->allocator.scratch[r], ctx->allocator.argument[i]);
                 free_register(&ctx->allocator, r);
             }
@@ -283,6 +284,10 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Functi
 
                         case TYPE_I32:
                             strfmt(buffer, "\tmovl %%eax, %%%sd\n", ctx->allocator.scratch[r]);
+                            break;
+                        
+                        case TYPE_I64:
+                            strfmt(buffer, "\tmovq %%rax, %%%s\n", ctx->allocator.scratch[r]);
                             break;
 
                         case TYPE_F32:
@@ -528,9 +533,12 @@ char* generate(struct Unit* unit, struct Context* ctx) {
         "\t.string\t\"%d\\n\"\n"
         "\n"
         ".LC1:\n"
-        "\t.string\t\"%c\"\n"
+        "\t.string\t\"%ld\\n\"\n"
         "\n"
         ".LC2:\n"
+        "\t.string\t\"%c\"\n"
+        "\n"
+        ".LC3:\n"
         "\t.string\t\"\\n\"\n"
         "\n"
         "printn_int:\n"
@@ -547,6 +555,18 @@ char* generate(struct Unit* unit, struct Context* ctx) {
         "\tleave\n"
         "\tret\n"
         "\n"
+        "printn_long:\n"
+        "\tpushq\t%rbp\n"
+        "\tmovq\t%rsp, %rbp\n"
+        "\tsubq\t$16, %rsp\n"
+        "\tmovq\t%rdi, %rsi\n"
+        "\tleaq	.LC1(%rip), %rdi\n"
+        "\tmovq	$0, %rax\n"
+        "\tcall	printf@PLT\n"
+        "\tnop\n"
+        "\tleave\n"
+        "\tret\n"
+        "\n"
         "print_char:\n"
         "\tpushq\t%rbp\n"
         "\tmovq\t%rsp, %rbp\n"
@@ -554,7 +574,7 @@ char* generate(struct Unit* unit, struct Context* ctx) {
         "\tmovl\t%edi, -4(%rbp)\n"
         "\tmovl\t-4(%rbp), %eax\n"
         "\tmovl\t%eax, %esi\n"
-        "\tleaq	.LC1(%rip), %rdi\n"
+        "\tleaq	.LC2(%rip), %rdi\n"
         "\tmovl	$0, %eax\n"
         "\tcall	printf@PLT\n"
         "\tnop\n"
@@ -567,7 +587,7 @@ char* generate(struct Unit* unit, struct Context* ctx) {
         "\tsubq\t$16, %rsp\n"
         "\tmovl\t-4(%rbp), %eax\n"
         "\tmovl\t%eax, %esi\n"
-        "\tleaq	.LC2(%rip), %rdi\n"
+        "\tleaq	.LC3(%rip), %rdi\n"
         "\tmovl	$0, %eax\n"
         "\tcall	printf@PLT\n"
         "\tnop\n"

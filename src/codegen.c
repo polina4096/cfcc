@@ -2,89 +2,10 @@
 #define CFCC_CODEGEN_C
 
 #include <stdio.h>
-#include <stdarg.h>
 #include <stdlib.h>
-#include <string.h>
 
 #include "hir.c"
-
-static int strapp(char** buffer_ptr, char* appendage) {
-    size_t length_appendage = strlen(appendage);
-
-    char* ptr;
-    if (*buffer_ptr != NULL) {
-        ptr = realloc(*buffer_ptr, strlen(*buffer_ptr) + length_appendage + 1);
-        strcat(ptr, appendage);
-    } else {
-        ptr = malloc(length_appendage + 1);
-        memcpy(ptr, appendage, length_appendage);
-        ptr[length_appendage] = '\0';
-    }
-
-    if (ptr != NULL) {
-        *buffer_ptr = ptr;
-        return 0; // Success
-    } else {
-        return -1; // Failed to reallocate
-    }
-}
-
-static int strfmt(char** buffer_ptr, const char* format, ...) {
-    va_list args;
-    va_start(args, format);    
-    int length = vsnprintf(NULL, 0, format, args);
-    char* temp = malloc(length + 1);
-    va_end(args);
-
-    va_start(args, format);
-    vsnprintf(temp, length + 1, format, args);
-    va_end(args);
-    
-    int result = strapp(buffer_ptr, temp);
-    free(temp);
-
-    return result;
-}
-
-struct RegisterAllocator {
-    int* scratch_state;
-    const char** scratch;
-    size_t scratch_count;
-
-    const char** argument;
-    size_t argument_count;
-};
-
-struct Context {
-    struct RegisterAllocator allocator;
-    size_t free_label;
-    size_t frame_size;
-};
-
-size_t alloc_register(struct RegisterAllocator* registers) {
-    for (int i = 0; i < registers->scratch_count; i++) {
-        // 0 means register has not been taken yet
-        if (registers->scratch_state[i] == 0) {
-            // mark the register as taken
-            registers->scratch_state[i] = 1;
-
-            // return it's index
-            return i;
-        }
-    }
-
-    return -1;
-}
-
-void free_register(struct RegisterAllocator* registers, size_t idx) {
-    registers->scratch_state[idx] = 0;
-}
-
-void free_all_registers(struct RegisterAllocator* registers) {
-    for (int i = 0; i < registers->scratch_count; i++) {
-        registers->scratch_state[i] = 0;
-    }
-}
+#include "asm.c"
 
 size_t calc_var_offset(struct Scope* scope, struct Variable* var, bool* found) {
     size_t offset = 0;
@@ -110,42 +31,35 @@ size_t calc_var_offset(struct Scope* scope, struct Variable* var, bool* found) {
     return offset;
 }
 
-void generate_logical_op(const char* suffix, size_t r1, size_t r2, struct Context* ctx, char** buffer) {
-    strfmt(buffer, "\tcmpl %%%sd, %%%sd\n", ctx->allocator.scratch[r2], ctx->allocator.scratch[r1]);
-    strfmt(buffer, "\tset%s %%%sb\n", suffix, ctx->allocator.scratch[r1]);
-    strfmt(buffer, "\tmovzbl %%%sb, %%%sd\n", ctx->allocator.scratch[r1], ctx->allocator.scratch[r1]);
-}
-
-size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Function* func, struct Context* ctx, char** buffer) {    
+struct Register generate_expr(struct Expression* expr, struct Scope* scope, struct Function* func, struct Context* ctx, char** buffer) {    
     switch (expr->kind) {
         case EXPR_VARIABLE: {
-            size_t r = alloc_register(&ctx->allocator);
+            struct Register r = alloc_register(&ctx->allocator, type_size(expr->expr_variable.variable->type));
             size_t offset = calc_var_offset(&func->scope, expr->expr_variable.variable, NULL);
-            strfmt(buffer, "\tmovl -%i(%%rbp), %%%sd\n", offset, ctx->allocator.scratch[r]);
+            load_ir(buffer, offset, r, ctx);
             return r;
         }
 
         case EXPR_VARIABLE_INDEX: {
-            size_t r = alloc_register(&ctx->allocator);
-            size_t r_index_offset = generate_expr(expr->expr_variable_index.index_expression, scope, func, ctx, buffer);
+            struct Register r = alloc_register(&ctx->allocator, type_size(expr->expr_variable_index.variable->type->array.type));
+            struct Register r_index_offset = generate_expr(expr->expr_variable_index.index_expression, scope, func, ctx, buffer);
             size_t stack_offset = calc_var_offset(&func->scope, expr->expr_variable_index.variable, NULL);
-            strfmt(buffer, "\tmovl %%%sd, %%eax\n", ctx->allocator.scratch[r_index_offset], stack_offset);
-            free_register(&ctx->allocator, r_index_offset);
+            
+            load_irr(buffer, stack_offset, r_index_offset, r, ctx);
+            free_register(&ctx->allocator, r_index_offset.index);
 
-            strapp(buffer, "\tcltq\n");
-            strfmt(buffer, "\tmovl -%i(%%rbp,%%rax,4), %%%sd\n", stack_offset, ctx->allocator.scratch[r]);
             return r;
         }
 
         case EXPR_VARIABLE_POINTER: {
-            size_t r = alloc_register(&ctx->allocator);
+            struct Register r = alloc_register(&ctx->allocator, type_size(expr->expr_variable_index.variable->type->pointer.type));
             size_t offset = calc_var_offset(&func->scope, expr->expr_variable_pointer.variable, NULL);
-            strfmt(buffer, "\tleaq -%i(%%rbp), %%%s\n", offset, ctx->allocator.scratch[r]);
+            read_ir(buffer, offset, r, ctx);
             return r;
         }
 
         case EXPR_ASSIGNMENT: {
-            size_t r = generate_expr(expr->expr_assignment.expression, scope, func, ctx, buffer);
+            struct Register r = generate_expr(expr->expr_assignment.expression, scope, func, ctx, buffer);
             size_t offset = calc_var_offset(&func->scope, expr->expr_assignment.variable, NULL);
 
             // TODO: implement proper type support
@@ -155,12 +69,12 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Functi
                 case TYPE_KIND_BASIC: {
                     switch (type_size(type)) {
                         case 4: {
-                            strfmt(buffer, "\tmovl %%%sd, -%i(%%rbp)\n", ctx->allocator.scratch[r], offset);
+                            strfmt(buffer, "\tmovl %%%sd, -%i(%%rbp)\n", ctx->allocator.scratch[r.index], offset);
                             break;
                         }
 
                         case 8: {
-                            strfmt(buffer, "\tmovq %%%s, -%i(%%rbp)\n", ctx->allocator.scratch[r], offset);
+                            strfmt(buffer, "\tmovq %%%s, -%i(%%rbp)\n", ctx->allocator.scratch[r.index], offset);
                             break;
                         }
 
@@ -186,24 +100,24 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Functi
         }
 
         case EXPR_ASSIGNMENT_INDEX: {
-            size_t r = generate_expr(expr->expr_assignment_index.expression, scope, func, ctx, buffer);
-            size_t r_index_offset = generate_expr(expr->expr_assignment_index.index_expression, scope, func, ctx, buffer);
+            struct Register r = generate_expr(expr->expr_assignment_index.expression, scope, func, ctx, buffer);
+            struct Register r_index_offset = generate_expr(expr->expr_assignment_index.index_expression, scope, func, ctx, buffer);
             size_t stack_offset = calc_var_offset(&func->scope, expr->expr_assignment_index.variable, NULL);
-            strfmt(buffer, "\tmovl %%%sd, %%eax\n", ctx->allocator.scratch[r_index_offset], stack_offset);
-            free_register(&ctx->allocator, r_index_offset);
+            strfmt(buffer, "\tmovl %%%sd, %%eax\n", ctx->allocator.scratch[r_index_offset.index], stack_offset);
+            free_register(&ctx->allocator, r_index_offset.index);
 
             strapp(buffer, "\tcltq\n");
-            strfmt(buffer, "\tmovl %%%sd, -%i(%%rbp,%%rax,4)\n", ctx->allocator.scratch[r], stack_offset);
+            strfmt(buffer, "\tmovl %%%sd, -%i(%%rbp,%%rax,4)\n", ctx->allocator.scratch[r.index], stack_offset);
             return r;
         }
 
         case EXPR_ASSIGNMENT_POINTER: {
-            size_t r = generate_expr(expr->expr_assignment_pointer.expression, scope, func, ctx, buffer);
-            size_t r_memory_address = generate_expr(expr->expr_assignment_pointer.expression, scope, func, ctx, buffer);
+            struct Register r = generate_expr(expr->expr_assignment_pointer.expression, scope, func, ctx, buffer);
+            struct Register r_memory_address = generate_expr(expr->expr_assignment_pointer.expression, scope, func, ctx, buffer);
             size_t offset = calc_var_offset(&func->scope, expr->expr_assignment_pointer.variable, NULL);
-            strfmt(buffer, "\tmovq -%i(%%rbp), %%%s\n", offset, ctx->allocator.scratch[r_memory_address]);
-            strfmt(buffer, "\tmovl %%%sd, (%%%s)\n", ctx->allocator.scratch[r], ctx->allocator.scratch[r_memory_address]);
-            free_register(&ctx->allocator, r_memory_address);
+            strfmt(buffer, "\tmovq -%i(%%rbp), %%%s\n", offset, ctx->allocator.scratch[r_memory_address.index]);
+            strfmt(buffer, "\tmovl %%%sd, (%%%s)\n", ctx->allocator.scratch[r.index], ctx->allocator.scratch[r_memory_address.index]);
+            free_register(&ctx->allocator, r_memory_address.index);
 
             return r;
         }
@@ -218,14 +132,14 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Functi
                         }
 
                         case TYPE_I32: {
-                            size_t r = alloc_register(&ctx->allocator);
-                            strfmt(buffer, "\tmovl $%s, %%%sd\n", expr->expr_literal.value, ctx->allocator.scratch[r]);
+                            struct Register r = alloc_register(&ctx->allocator, 4);
+                            strfmt(buffer, "\tmovl $%s, %%%sd\n", expr->expr_literal.value, ctx->allocator.scratch[r.index]);
                             return r;
                         }
 
                         case TYPE_I64: {
-                            size_t r = alloc_register(&ctx->allocator);
-                            strfmt(buffer, "\tmovq $%s, %%%s\n", expr->expr_literal.value, ctx->allocator.scratch[r]);
+                            struct Register r = alloc_register(&ctx->allocator, 8);
+                            strfmt(buffer, "\tmovq $%s, %%%s\n", expr->expr_literal.value, ctx->allocator.scratch[r.index]);
                             return r;
                         }
 
@@ -245,7 +159,7 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Functi
                     break;
             }
 
-            return -1;
+            return (struct Register) { -1, -1 };
         }
 
         case EXPR_CALL: {
@@ -258,10 +172,9 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Functi
 
             // load args into arg registers
             for (int i = 0; i < expr->expr_call.args_length; i++) {
-                size_t r = generate_expr(expr->expr_call.args[i], scope, func, ctx, buffer);
-                
-                strfmt(buffer, "\tmovl %%%sd, %%e%s\n", ctx->allocator.scratch[r], ctx->allocator.argument[i]);
-                free_register(&ctx->allocator, r);
+                struct Register r = generate_expr(expr->expr_call.args[i], scope, func, ctx, buffer);
+                arg_r(buffer, i, r, ctx);
+                free_register(&ctx->allocator, r.index);
             }
 
             // call function
@@ -274,8 +187,8 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Functi
                 }
             }
 
-            size_t r = alloc_register(&ctx->allocator);
             struct Type* return_type = expr->expr_call.func->return_type;
+            struct Register r = alloc_register(&ctx->allocator, type_size(return_type));
             switch (return_type->kind) {
                 case TYPE_KIND_BASIC: {
                     switch (return_type->basic) {
@@ -283,11 +196,11 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Functi
                             break;
 
                         case TYPE_I32:
-                            strfmt(buffer, "\tmovl %%eax, %%%sd\n", ctx->allocator.scratch[r]);
+                            strfmt(buffer, "\tmovl %%eax, %%%sd\n", ctx->allocator.scratch[r.index]);
                             break;
                         
                         case TYPE_I64:
-                            strfmt(buffer, "\tmovq %%rax, %%%s\n", ctx->allocator.scratch[r]);
+                            strfmt(buffer, "\tmovq %%rax, %%%s\n", ctx->allocator.scratch[r.index]);
                             break;
 
                         case TYPE_F32:
@@ -315,108 +228,108 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Functi
             switch (bin_op->kind) {
                 // logical
                 case BINARY_OP_AND: {
-                    size_t r1 = generate_expr(bin_op->left, scope, func, ctx, buffer);
-                    size_t r2 = generate_expr(bin_op->right, scope, func, ctx, buffer);
+                    struct Register r1 = generate_expr(bin_op->left, scope, func, ctx, buffer);
+                    struct Register r2 = generate_expr(bin_op->right, scope, func, ctx, buffer);
 
-                    strfmt(buffer, "\tcmpl $1, %%%sd\n", ctx->allocator.scratch[r1]);
+                    strfmt(buffer, "\tcmpl $1, %%%sd\n", ctx->allocator.scratch[r1.index]);
                     strfmt(buffer, "\tjne .L%zu\n", ctx->free_label);
 
-                    strfmt(buffer, "\tcmpl $1, %%%sd\n", ctx->allocator.scratch[r2]);
+                    strfmt(buffer, "\tcmpl $1, %%%sd\n", ctx->allocator.scratch[r2.index]);
                     strfmt(buffer, "\tjne .L%zu\n", ctx->free_label);
 
-                    strfmt(buffer, "\tmovl $1, %%%sd\n", ctx->allocator.scratch[r1]);
+                    strfmt(buffer, "\tmovl $1, %%%sd\n", ctx->allocator.scratch[r1.index]);
                     strfmt(buffer, "\tjmp .L%zu\n", ctx->free_label + 1);
 
                     strfmt(buffer, ".L%zu:\n", ctx->free_label);
                     ctx->free_label += 1;
 
-                    strfmt(buffer, "\tmovl $0, %%%sd\n", ctx->allocator.scratch[r1]);
+                    strfmt(buffer, "\tmovl $0, %%%sd\n", ctx->allocator.scratch[r1.index]);
                     strfmt(buffer, ".L%zu:\n", ctx->free_label);
                     ctx->free_label += 1;
 
-                    free_register(&ctx->allocator, r2);
+                    free_register(&ctx->allocator, r2.index);
                     return r1;
                 }
 
                 case BINARY_OP_OR: {
-                    size_t r1 = generate_expr(bin_op->left, scope, func, ctx, buffer);
-                    size_t r2 = generate_expr(bin_op->right, scope, func, ctx, buffer);
+                    struct Register r1 = generate_expr(bin_op->left, scope, func, ctx, buffer);
+                    struct Register r2 = generate_expr(bin_op->right, scope, func, ctx, buffer);
 
-                    strfmt(buffer, "\tcmpl $1, %%%sd\n", ctx->allocator.scratch[r1]);
+                    strfmt(buffer, "\tcmpl $1, %%%sd\n", ctx->allocator.scratch[r1.index]);
                     strfmt(buffer, "\tje .L%zu\n", ctx->free_label);
 
-                    strfmt(buffer, "\tcmpl $1, %%%sd\n", ctx->allocator.scratch[r2]);
+                    strfmt(buffer, "\tcmpl $1, %%%sd\n", ctx->allocator.scratch[r2.index]);
                     strfmt(buffer, "\tje .L%zu\n", ctx->free_label);
 
-                    strfmt(buffer, "\tmovl $0, %%%sd\n", ctx->allocator.scratch[r1]);
+                    strfmt(buffer, "\tmovl $0, %%%sd\n", ctx->allocator.scratch[r1.index]);
                     strfmt(buffer, "\tjmp .L%zu\n", ctx->free_label + 1);
 
                     strfmt(buffer, ".L%zu:\n", ctx->free_label);
                     ctx->free_label += 1;
 
-                    strfmt(buffer, "\tmovl $1, %%%sd\n", ctx->allocator.scratch[r1]);
+                    strfmt(buffer, "\tmovl $1, %%%sd\n", ctx->allocator.scratch[r1.index]);
 
                     strfmt(buffer, ".L%zu:\n", ctx->free_label);
                     ctx->free_label += 1;
 
-                    free_register(&ctx->allocator, r2);
+                    free_register(&ctx->allocator, r2.index);
                     return r1;
                 }
             }
 
-            size_t r1 = generate_expr(bin_op->left, scope, func, ctx, buffer);
-            size_t r2 = generate_expr(bin_op->right, scope, func, ctx, buffer);
+            struct Register r1 = generate_expr(bin_op->left, scope, func, ctx, buffer);
+            struct Register r2 = generate_expr(bin_op->right, scope, func, ctx, buffer);
             switch (bin_op->kind) {
                 // math
                 case BINARY_OP_ADD:
-                    strfmt(buffer, "\taddl %%%sd, %%%sd\n", ctx->allocator.scratch[r2], ctx->allocator.scratch[r1]);
+                    add_rr(buffer, r1, r2, ctx);
                     break;
 
                 case BINARY_OP_SUB:
-                    strfmt(buffer, "\tsubl %%%sd, %%%sd\n", ctx->allocator.scratch[r2], ctx->allocator.scratch[r1]);
+                    sub_rr(buffer, r1, r2, ctx);
+                    break;
+
+                case BINARY_OP_MUL:
+                    mul_rr(buffer, r1, r2, ctx);
                     break;
 
                 case BINARY_OP_DIV:
                     // TODO: division is hard :\
                     break;
 
-                case BINARY_OP_MUL:
-                    strfmt(buffer, "\timull %%%sd, %%%sd\n", ctx->allocator.scratch[r2], ctx->allocator.scratch[r1]);
-                    break;
-
                 // relational
                 case BINARY_OP_LT:
-                    generate_logical_op("l", r1, r2, ctx, buffer);
+                    logical_rr(buffer, r1, r2, "l", ctx);
                     break;
 
                 case BINARY_OP_GT:
-                    generate_logical_op("g", r1, r2, ctx, buffer);
+                    logical_rr(buffer, r1, r2, "g", ctx);
                     break;
 
                 case BINARY_OP_LET:
-                    generate_logical_op("le", r1, r2, ctx, buffer);
+                    logical_rr(buffer, r1, r2, "le", ctx);
                     break;
 
                 case BINARY_OP_GET:
-                    generate_logical_op("ge", r1, r2, ctx, buffer);
+                    logical_rr(buffer, r1, r2, "ge", ctx);
                     break;
 
                 // equality
                 case BINARY_OP_EQ:
-                    generate_logical_op("e", r1, r2, ctx, buffer);
+                    logical_rr(buffer, r1, r2, "e", ctx);
                     break;
 
                 case BINARY_OP_NE:
-                    generate_logical_op("ne", r1, r2, ctx, buffer);
+                    logical_rr(buffer, r1, r2, "ne", ctx);
                     break;
                 }
 
-            free_register(&ctx->allocator, r2);
+            free_register(&ctx->allocator, r2.index);
             return r1;
         }
     }
 
-    return -1;
+    return (struct Register) { -1, -1 };
 }
 
 void generate_statement(struct Statement* stmt, struct Scope* scope, struct Function* func, struct Context* ctx, char** buffer);
@@ -449,9 +362,9 @@ void generate_statement(struct Statement* stmt, struct Scope* scope, struct Func
         
         case STMT_IF:
         case STMT_IF_ELSE: {
-            size_t r = generate_expr(&stmt->stmt_if.condition_expr, scope, func, ctx, buffer);
-            strfmt(buffer, "\tcmpl $1, %%%sd\n", ctx->allocator.scratch[r]);
-            free_register(&ctx->allocator, r);
+            struct Register r = generate_expr(&stmt->stmt_if.condition_expr, scope, func, ctx, buffer);
+            strfmt(buffer, "\tcmpl $1, %%%sd\n", ctx->allocator.scratch[r.index]);
+            free_register(&ctx->allocator, r.index);
 
             if (stmt->kind == STMT_IF_ELSE) {
                 size_t label_else = ctx->free_label;
@@ -483,9 +396,9 @@ void generate_statement(struct Statement* stmt, struct Scope* scope, struct Func
         }
 
         case STMT_RETURN: {
-            size_t r = generate_expr(&stmt->stmt_return.expr, scope, func, ctx, buffer);
-            strfmt(buffer, "\tmovl %%%sd, %%eax\n", ctx->allocator.scratch[r]);
-            free_register(&ctx->allocator, r);
+            struct Register r = generate_expr(&stmt->stmt_return.expr, scope, func, ctx, buffer);
+            strfmt(buffer, "\tmovl %%%sd, %%eax\n", ctx->allocator.scratch[r.index]);
+            free_register(&ctx->allocator, r.index);
 
             strfmt(buffer, "\tjmp .%s_exit\n", func->identifier);
             // strfmt(buffer, "\taddq $%zu, %%rsp\n", ctx->frame_size);
@@ -495,8 +408,8 @@ void generate_statement(struct Statement* stmt, struct Scope* scope, struct Func
         }
 
         case STMT_EXPRESSION: {
-            size_t r = generate_expr(&stmt->stmt_expression.expr, scope, func, ctx, buffer);
-            free_register(&ctx->allocator, r);
+            struct Register r = generate_expr(&stmt->stmt_expression.expr, scope, func, ctx, buffer);
+            free_register(&ctx->allocator, r.index);
             break;
         }
     }

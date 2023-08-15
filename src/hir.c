@@ -52,17 +52,17 @@ struct ExprVariable {
     struct Variable* variable;
 };
 
-struct ExprVariableIndex {
-    struct Variable* variable;
-    struct Expression* index_expression;
+struct ExprIndex {
+    struct Expression* location;
+    struct Expression* expression;
 };
 
-struct ExprVariablePointer {
-    struct Variable* variable;
+struct ExprAddressOf {
+    struct Expression* expression;
 };
 
 struct ExprAssignment {
-    struct Variable* variable;
+    struct Expression* location;
     struct Expression* expression;
 };
 
@@ -119,11 +119,9 @@ struct ExprBinaryOp {
 
 enum ExpressionKind {
     EXPR_VARIABLE,
-    EXPR_VARIABLE_INDEX,
-    EXPR_VARIABLE_POINTER,
+    EXPR_INDEX,
+    EXPR_ADDRESS_OF,
     EXPR_ASSIGNMENT,
-    EXPR_ASSIGNMENT_INDEX,
-    EXPR_ASSIGNMENT_POINTER,
     EXPR_LITERAL,
     EXPR_CALL,
     EXPR_BIN_OP,
@@ -133,8 +131,8 @@ struct Expression {
     enum ExpressionKind kind;
     union {
         struct ExprVariable expr_variable;
-        struct ExprVariableIndex expr_variable_index;
-        struct ExprVariablePointer expr_variable_pointer;
+        struct ExprIndex expr_index;
+        struct ExprAddressOf expr_address_of;
         struct ExprAssignment expr_assignment;
         struct ExprAssignmentIndex expr_assignment_index;
         struct ExprAssignmentPointer expr_assignment_pointer;
@@ -468,105 +466,56 @@ void lower_expression(struct Expression* expr, struct Scope* scope, const char* 
         }
 
         case sym_subscript_expression: {
-            expr->kind = EXPR_VARIABLE_INDEX;
+            expr->kind = EXPR_INDEX;
 
-            TSNode ident_node = ts_node_named_child(node, 0);
+            TSNode location_node = ts_node_named_child(node, 0);
             TSNode index_expr_node = ts_node_named_child(node, 1);
-            char* identifier = tsnstr(src, ident_node);
-
-            expr->expr_variable_index.variable = find_var(identifier, scope);
-            expr->expr_variable_index.index_expression = malloc(sizeof(struct Expression));
-            lower_expression(expr->expr_variable_index.index_expression, scope, src, index_expr_node);
-
-            if (expr->expr_variable_index.variable == NULL) {
-                printf("variable `%s` not found\n", identifier);
-            }
+            
+            expr->kind = EXPR_INDEX;
+            expr->expr_assignment.location = malloc(sizeof(struct Expression));
+            expr->expr_assignment.expression = malloc(sizeof(struct Expression));
+            lower_expression(expr->expr_index.location, scope, src, location_node);
+            lower_expression(expr->expr_index.expression, scope, src, index_expr_node);
 
             break;
         }
 
         case sym_pointer_expression: {
-            expr->kind = EXPR_VARIABLE_POINTER;
+            TSNode op_node = ts_node_child(node, 0);
+            char* op = tsnstr(src, op_node);
+            switch (op[0])
+            {
+            case '*': {
 
-            TSNode ident_node = ts_node_named_child(node, 0);
-            char* identifier = tsnstr(src, ident_node);
-            expr->expr_variable_pointer.variable = find_var(identifier, scope);
+                break;
+            }
 
-            if (expr->expr_variable_pointer.variable == NULL) {
-                printf("variable `%s` not found\n", identifier);
+            case '&': {
+                expr->kind = EXPR_ADDRESS_OF;
+
+                TSNode expr_node = ts_node_named_child(node, 0);
+                expr->expr_address_of.expression = malloc(sizeof(struct Expression));
+                lower_expression(expr->expr_address_of.expression, scope, src, expr_node);
+
+                break;
+            }
+
+            default:
+                break;
             }
 
             break;
         }
 
         case sym_assignment_expression: {
-            TSNode var_node = ts_node_named_child(node, 0);
+            TSNode lval_node = ts_node_named_child(node, 0);
             TSNode expr_node = ts_node_named_child(node, 1);
-            int var_node_sym = ts_node_symbol(var_node);
 
-            switch (var_node_sym) {
-                case sym_identifier: {
-                    expr->kind = EXPR_ASSIGNMENT;
-
-                    // slot
-                    char* identifier = tsnstr(src, var_node);
-                    expr->expr_assignment.variable = find_var(identifier, scope);
-
-                    if (expr->expr_assignment.variable == NULL) {
-                        printf("variable `%s` not found\n", identifier);
-                    }
-
-                    // expression
-                    expr->expr_assignment.expression = malloc(sizeof(struct Expression));
-                    lower_expression(expr->expr_assignment.expression, scope, src, expr_node);
-
-                    break;
-                }
-
-                case sym_subscript_expression: {
-                    expr->kind = EXPR_ASSIGNMENT_INDEX;
-
-                    // slot
-                    TSNode ident_node = ts_node_named_child(var_node, 0);
-                    TSNode index_expr_node = ts_node_named_child(var_node, 1);
-                    char* identifier = tsnstr(src, ident_node);
-
-                    expr->expr_assignment_index.variable = find_var(identifier, scope);
-                    expr->expr_assignment_index.index_expression = malloc(sizeof(struct Expression));
-                    lower_expression(expr->expr_assignment_index.index_expression, scope, src, index_expr_node);
-
-                    if (expr->expr_assignment.variable == NULL) {
-                        printf("variable `%s` not found\n", identifier);
-                    }
-
-                    // expression
-                    expr->expr_assignment_index.expression = malloc(sizeof(struct Expression));
-                    lower_expression(expr->expr_assignment_index.expression, scope, src, expr_node);
-
-                    break;
-                }
-
-                case sym_pointer_expression: {
-                    expr->kind = EXPR_ASSIGNMENT_POINTER;
-
-                    // slot
-                    TSNode ident_node = ts_node_named_child(var_node, 0);
-                    char* identifier = tsnstr(src, ident_node);
-                    expr->expr_variable_pointer.variable = find_var(identifier, scope);
-
-                    if (expr->expr_variable_pointer.variable == NULL) {
-                        printf("variable `%s` not found\n", identifier);
-                    }
-
-                    // expression
-                    expr->expr_assignment_pointer.expression = malloc(sizeof(struct Expression));
-                    lower_expression(expr->expr_assignment_pointer.expression, scope, src, expr_node);
-
-                    break;
-                }
-
-            }
-            
+            expr->kind = EXPR_ASSIGNMENT;
+            expr->expr_assignment.location = malloc(sizeof(struct Expression));
+            expr->expr_assignment.expression = malloc(sizeof(struct Expression));
+            lower_expression(expr->expr_assignment.location, scope, src, lval_node);
+            lower_expression(expr->expr_assignment.expression, scope, src, expr_node);
             break;
         }
 
@@ -733,7 +682,7 @@ void lower_statement(struct Scope* scope, const char* src, TSNode node) {
 
                     struct Expression* expr = &stmt->stmt_expression.expr;
                     expr->kind = EXPR_ASSIGNMENT;
-                    expr->expr_assignment.variable = local;
+                    // expr->expr_assignment.variable = local;
                     expr->expr_assignment.expression = malloc(sizeof(struct Expression));
                     lower_expression(expr->expr_assignment.expression, scope, src, expr_node);
 

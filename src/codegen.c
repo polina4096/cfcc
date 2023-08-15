@@ -116,6 +116,56 @@ void generate_logical_op(const char* suffix, size_t r1, size_t r2, struct Contex
     strfmt(buffer, "\tmovzbl %%%sb, %%%sd\n", ctx->allocator.scratch[r1], ctx->allocator.scratch[r1]);
 }
 
+struct LValue {
+    size_t offset;
+    size_t r_index;
+    size_t r_address;
+    // in case lvalue is actually an expression
+    size_t r_expr;
+};
+
+size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Function* func, struct Context* ctx, char** buffer);
+
+struct LValue generate_lvalue(struct Expression* expr, struct Scope* scope, struct Function* func, struct Context* ctx, char** buffer) {
+    switch (expr->kind) {
+        case EXPR_VARIABLE: {
+            size_t offset = calc_var_offset(&func->scope, expr->expr_variable.variable, NULL);
+
+            struct LValue out;
+            out.offset = offset;
+            out.r_index = -1;
+            out.r_address = -1;
+            out.r_expr = -1;
+            return out;
+        }
+
+        case EXPR_INDEX: {
+            struct LValue lval_location = generate_lvalue(expr->expr_index.location, scope, func, ctx, buffer);
+            struct LValue lval_index;
+
+            if (lval_location.r_expr != -1) {
+                lval_index = lval_location;
+                lval_location = generate_lvalue(expr->expr_index.expression, scope, func, ctx, buffer);
+            } else {
+                lval_index.offset = -1;
+                lval_index.r_index = -1;
+                lval_index.r_address = -1;
+                lval_index.r_expr = generate_expr(expr->expr_index.expression, scope, func, ctx, buffer);
+            }
+
+            lval_location.r_index = lval_index.r_expr;
+            return lval_location;
+        }
+    }
+
+    struct LValue out;
+    out.offset = -1;
+    out.r_index = -1;
+    out.r_address = -1;
+    out.r_expr = generate_expr(expr, scope, func, ctx, buffer);
+    return out;
+}
+
 size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Function* func, struct Context* ctx, char** buffer) {    
     switch (expr->kind) {
         case EXPR_VARIABLE: {
@@ -125,59 +175,90 @@ size_t generate_expr(struct Expression* expr, struct Scope* scope, struct Functi
             return r;
         }
 
-        case EXPR_VARIABLE_INDEX: {
+        case EXPR_INDEX: {
             size_t r = alloc_register(&ctx->allocator);
-            size_t r_index_offset = generate_expr(expr->expr_variable_index.index_expression, scope, func, ctx, buffer);
-            size_t stack_offset = calc_var_offset(&func->scope, expr->expr_variable_index.variable, NULL);
-            strfmt(buffer, "\tmovl %%%sd, %%eax\n", ctx->allocator.scratch[r_index_offset], stack_offset);
-            free_register(&ctx->allocator, r_index_offset);
+            struct LValue lval_location = generate_lvalue(expr->expr_index.location, scope, func, ctx, buffer);
+            struct LValue lval_index;
+
+            if (lval_location.r_expr != -1) {
+                lval_index = lval_location;
+                lval_location = generate_lvalue(expr->expr_index.expression, scope, func, ctx, buffer);
+            } else {
+                lval_index.offset = -1;
+                lval_index.r_index = -1;
+                lval_index.r_address = -1;
+                lval_index.r_expr = generate_expr(expr->expr_index.expression, scope, func, ctx, buffer);
+            }
+
+            strfmt(buffer, "\tmovl %%%sd, %%eax\n", ctx->allocator.scratch[lval_index.r_expr]);
+            free_register(&ctx->allocator, lval_index.r_expr);
 
             strapp(buffer, "\tcltq\n");
-            strfmt(buffer, "\tmovl -%i(%%rbp,%%rax,4), %%%sd\n", stack_offset, ctx->allocator.scratch[r]);
+            if (lval_location.r_address == -1) {
+                strfmt(buffer, "\tmovl -%i(%%rbp,%%rax,4), %%%sd\n", lval_location.offset, ctx->allocator.scratch[r]);
+            } else {
+                strfmt(buffer, "\tmovl (%%%s,%%%s,4), %%%sd\n", ctx->allocator.scratch[lval_location.r_address], ctx->allocator.scratch[lval_location.r_index], ctx->allocator.scratch[r]);
+                free_register(&ctx->allocator, lval_index.r_index);
+                free_register(&ctx->allocator, lval_index.r_address);
+            }
+
             return r;
         }
 
-        case EXPR_VARIABLE_POINTER: {
-            size_t r = alloc_register(&ctx->allocator);
-            size_t offset = calc_var_offset(&func->scope, expr->expr_variable_pointer.variable, NULL);
-            strfmt(buffer, "\tleaq -%i(%%rbp), %%%s\n", offset, ctx->allocator.scratch[r]);
-            return r;
+        case EXPR_ADDRESS_OF: {
+            struct LValue lval = generate_lvalue(expr->expr_address_of.expression, scope, func, ctx, buffer);
+            if (lval.r_address == -1)  {
+                size_t r = alloc_register(&ctx->allocator);
+                strfmt(buffer, "\tleaq -%i(%%rbp), %%%s\n", lval.offset, ctx->allocator.scratch[r]);
+                return r;
+            } else {
+                return lval.r_address;
+            }
         }
 
         case EXPR_ASSIGNMENT: {
+            struct LValue lval = generate_lvalue(expr->expr_assignment.location, scope, func, ctx, buffer);
             size_t r = generate_expr(expr->expr_assignment.expression, scope, func, ctx, buffer);
-            size_t offset = calc_var_offset(&func->scope, expr->expr_assignment.variable, NULL);
-            // TODO: implement proper type support
-            if (expr->expr_assignment.expression->kind == EXPR_VARIABLE_POINTER) {
-                strfmt(buffer, "\tmovq %%%s, -%i(%%rbp)\n", ctx->allocator.scratch[r], offset);
+            
+            if (lval.r_index != -1) {
+                // stack array
+                strfmt(buffer, "\tmovl %%%sd, %%eax\n", ctx->allocator.scratch[lval.r_index]);
+                free_register(&ctx->allocator, lval.r_index);
+                
+                strfmt(buffer, "\tmovl %%%sd, -%i(%%rbp,%%rax,4)\n", ctx->allocator.scratch[r], lval.offset);
+            } else if (lval.r_address == -1)  {
+                // stack
+                strfmt(buffer, "\tmovl %%%sd, -%i(%%rbp)\n", ctx->allocator.scratch[r], lval.offset);
             } else {
-                strfmt(buffer, "\tmovl %%%sd, -%i(%%rbp)\n", ctx->allocator.scratch[r], offset);
+                // heap/stack
+                strfmt(buffer, "\tmovl %%%sd, (%%%s)\n", ctx->allocator.scratch[r], ctx->allocator.scratch[lval.r_address]);
             }
-            return r;
-        }
-
-        case EXPR_ASSIGNMENT_INDEX: {
-            size_t r = generate_expr(expr->expr_assignment_index.expression, scope, func, ctx, buffer);
-            size_t r_index_offset = generate_expr(expr->expr_assignment_index.index_expression, scope, func, ctx, buffer);
-            size_t stack_offset = calc_var_offset(&func->scope, expr->expr_assignment_index.variable, NULL);
-            strfmt(buffer, "\tmovl %%%sd, %%eax\n", ctx->allocator.scratch[r_index_offset], stack_offset);
-            free_register(&ctx->allocator, r_index_offset);
-
-            strapp(buffer, "\tcltq\n");
-            strfmt(buffer, "\tmovl %%%sd, -%i(%%rbp,%%rax,4)\n", ctx->allocator.scratch[r], stack_offset);
-            return r;
-        }
-
-        case EXPR_ASSIGNMENT_POINTER: {
-            size_t r = generate_expr(expr->expr_assignment_pointer.expression, scope, func, ctx, buffer);
-            size_t r_memory_address = generate_expr(expr->expr_assignment_pointer.expression, scope, func, ctx, buffer);
-            size_t offset = calc_var_offset(&func->scope, expr->expr_assignment_pointer.variable, NULL);
-            strfmt(buffer, "\tmovq -%i(%%rbp), %%%s\n", offset, ctx->allocator.scratch[r_memory_address]);
-            strfmt(buffer, "\tmovl %%%sd, (%%%s)\n", ctx->allocator.scratch[r], ctx->allocator.scratch[r_memory_address]);
-            free_register(&ctx->allocator, r_memory_address);
 
             return r;
         }
+
+        // case EXPR_ASSIGNMENT_INDEX: {
+        //     size_t r = generate_expr(expr->expr_assignment_index.expression, scope, func, ctx, buffer);
+        //     size_t r_index_offset = generate_expr(expr->expr_assignment_index.index_expression, scope, func, ctx, buffer);
+        //     size_t stack_offset = calc_var_offset(&func->scope, expr->expr_assignment_index.variable, NULL);
+        //     strfmt(buffer, "\tmovl %%%sd, %%eax\n", ctx->allocator.scratch[r_index_offset], stack_offset);
+        //     free_register(&ctx->allocator, r_index_offset);
+
+        //     strapp(buffer, "\tcltq\n");
+        //     strfmt(buffer, "\tmovl %%%sd, -%i(%%rbp,%%rax,4)\n", ctx->allocator.scratch[r], stack_offset);
+        //     return r;
+        // }
+
+        // case EXPR_ASSIGNMENT_POINTER: {
+        //     size_t r = generate_expr(expr->expr_assignment_pointer.expression, scope, func, ctx, buffer);
+        //     size_t r_memory_address = generate_expr(expr->expr_assignment_pointer.expression, scope, func, ctx, buffer);
+        //     size_t offset = calc_var_offset(&func->scope, expr->expr_assignment_pointer.variable, NULL);
+        //     strfmt(buffer, "\tmovq -%i(%%rbp), %%%s\n", offset, ctx->allocator.scratch[r_memory_address]);
+        //     strfmt(buffer, "\tmovl %%%sd, (%%%s)\n", ctx->allocator.scratch[r], ctx->allocator.scratch[r_memory_address]);
+        //     free_register(&ctx->allocator, r_memory_address);
+
+        //     return r;
+        // }
 
         case EXPR_LITERAL: {
             struct ExprLiteral* lit = &expr->expr_literal;
